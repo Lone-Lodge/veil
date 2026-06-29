@@ -1,0 +1,9 @@
+# veil_measure — layout computation.
+
+use veil_geometry
+
+# A measured node — final pixel rect after layout pass.
+pub data Measured: node_id: int, rect: Rect
+
+pub fn measure_stub(node_id: int) -> Measured:
+    Measured{node_id: node_id, rect: Rect{x: 0, y: 0, width: 0, height: 0}}

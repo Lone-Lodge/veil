@@ -1,0 +1,6 @@
+name = "veil_display"
+version = "0.0.1"
+description = "Veil — display list: flat 2D render seam"
+
+[orbs]
+veil_geometry = "path:../veil_geometry"

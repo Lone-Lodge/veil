@@ -1,0 +1,21 @@
+# veil_display — the display list.
+#
+# The universal 2D render seam every backend (web, wgpu, …) consumes.
+# Rust kept this at 1151 LOC. Orion collapses it to an enum: each
+# variant is one drawing primitive.
+
+use veil_geometry
+
+pub enum DrawCmd:
+    DrawRect(Rect, Text)
+    DrawText(Point, Text, Text)
+    DrawIcon(Point, Text)
+    DrawPath(Text, Text)
+
+pub data DisplayList: commands: [DrawCmd]
+
+pub fn empty_list() -> DisplayList:
+    DisplayList{commands: []}
+
+pub fn push_cmd(list: DisplayList, cmd: DrawCmd) -> DisplayList:
+    DisplayList{commands: push(list.commands, cmd)}

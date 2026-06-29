@@ -1,0 +1,9 @@
+name = "veil_web"
+version = "0.0.1"
+description = "Veil — browser backend (generic renderer + JSON display list)"
+
+[orbs]
+veil_display = "path:../veil_display"
+veil_document = "path:../veil_document"
+veil_resolver = "path:../veil_resolver"
+veil_theme = "path:../veil_theme"

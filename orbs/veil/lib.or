@@ -1,0 +1,22 @@
+# veil — Semantic Document UI.
+#
+# A UI here is NOT a tree of widgets — it is a SemanticDocument
+# (intent), reactively derived from Signals, turned into pixels by a
+# Resolver driven by a Theme.
+
+use veil_geometry
+use veil_token
+use veil_role
+use veil_signal
+use veil_document
+use veil_theme
+use veil_display
+use veil_interaction
+use veil_measure
+use veil_resolver
+use veil_web
+use veil_theme_web
+use veil_inventory
+use veil_showcase
+
+pub fn version() -> Text = comptime "0.0.1"

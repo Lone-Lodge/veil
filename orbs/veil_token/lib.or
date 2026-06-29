@@ -1,0 +1,11 @@
+# veil_token — primitive design values.
+#
+# "No margins; gap/pad only" — the Rust crate's invariant. Tokens
+# are named scalars the theme assembles into role styles.
+
+pub data Spacing: name: Text, pixels: int
+pub data Colour: name: Text, r: 0...255, g: 0...255, b: 0...255, a: 0...255
+pub data Radius: name: Text, pixels: int
+
+pub fn spacing(name: Text, pixels: int) -> Spacing:
+    Spacing{name: name, pixels: pixels}

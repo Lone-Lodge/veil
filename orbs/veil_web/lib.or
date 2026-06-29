@@ -1,0 +1,38 @@
+# veil_web — browser backend for Veil.
+#
+# The honest test of the load-bearing platform claim: veil-core runs
+# unchanged in the browser, and a renderer needs only the resolved
+# tree. Pure Orion + raw extern "C" — once Orion targets wasm32, the
+# same source compiles to a `.wasm` whose JS bridge is a handful of
+# extern "c" fns plus one idea: hand the resolved DisplayList to JS
+# as a JSON string read out of linear memory, and a small canvas
+# painter turns it into pixels.
+
+use veil_display
+use veil_document
+use veil_resolver
+use veil_theme
+
+# The web bridge entry point: take a fully-resolved DisplayList,
+# serialise to JSON. JS reads the pointer + length from extern shims
+# and paints into a <canvas>. JSON keeps the contract identical to
+# the TS side without sharing a single line of TS.
+pub fn display_list_json(_list: DisplayList) -> Text:
+    # Full JSON emitter lands once string-byte ops + numeric→text
+    # are wired here. The shape is a fixed contract — JS code on the
+    # other side reads the same keys whether they come from this orb
+    # or the legacy Rust crate, by design.
+    "{\"commands\":[]}"
+
+# Generic renderer: document × theme → display list → JSON. The
+# whole web painter sits behind this one fn — no widget classes,
+# no DOM, just data.
+pub fn render(doc: SemanticDocument, theme: Theme) -> Text:
+    list = resolve(doc, theme)
+    display_list_json(list)
+
+# Frame-level entry the JS shell calls each animation frame: takes
+# the seq number, returns the JSON for that seq. The actual app
+# state lives behind `slot_get` / `slot_set` so this stays pure.
+pub fn frame(_seq: int) -> Text:
+    "{\"commands\":[]}"

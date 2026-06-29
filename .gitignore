@@ -1,0 +1,12 @@
+target/
+dist/
+*.exe
+*.dll
+*.obj
+*.ll
+*.pdb
+.vscode/
+.idea/
+*.log
+*~
+*.swp

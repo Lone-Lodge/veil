@@ -1,0 +1,13 @@
+# veil_interaction — input → intent.
+
+pub enum Interaction:
+    PressAt(int, int)
+    ReleaseAt(int, int)
+    KeyPress(int)
+    Scroll(int)
+
+pub fn classify(kind: Text, x: int, y: int) -> Interaction:
+    if kind == "key_down":
+        KeyPress(x)
+    else:
+        PressAt(x, y)

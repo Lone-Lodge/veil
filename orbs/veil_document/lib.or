@@ -1,0 +1,15 @@
+# veil_document — the SemanticDocument IR.
+#
+# A node is a role + props + children. No widget classes, no
+# styling at the node level — those come from the theme via the
+# resolver. The 656-line Rust crate collapses to this shape.
+
+use veil_role
+
+pub data NodeProp: key: Text, value: Text
+pub data Node: role: Role, props: [NodeProp], children: [int]
+
+pub data SemanticDocument: root: int, nodes: [Node]
+
+pub fn empty_doc() -> SemanticDocument:
+    SemanticDocument{root: 0, nodes: []}

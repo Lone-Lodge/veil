@@ -1,0 +1,3 @@
+name = "veil_geometry"
+version = "0.0.1"
+description = "Veil — 2D primitives (Point, Rect, Size)"

@@ -1,0 +1,3 @@
+name = "veil_signal"
+version = "0.0.1"
+description = "Veil — fine-grained reactivity (state → view, no refresh)"

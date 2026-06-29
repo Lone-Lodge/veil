@@ -1,0 +1,48 @@
+use veil
+use io
+
+fn main() -> int:
+    print_line("Veil — pure Orion")
+    print_line("version: " + version())
+
+    rect = Rect{x: 0, y: 0, width: 100, height: 50}
+    inside = rect_contains(rect, Point{x: 25, y: 25})
+    outside = rect_contains(rect, Point{x: 200, y: 200})
+    print_line("rect contains (25,25): " + show_bool(inside))
+    print_line("rect contains (200,200): " + show_bool(outside))
+
+    doc = empty_doc()
+    theme = empty_theme()
+    display = resolve(doc, theme)
+    mut count = 0
+    for _cmd in display.commands:
+        count = count + 1
+    print_line("draw commands from empty doc: " + show_int(count))
+
+    # Web smoke: theme + inventory + showcase wired through veil_web.
+    web_theme = default_theme()
+    inv = demo_inventory()
+    moved = move_selection(inv, 2)
+    print_line("inventory selection: " + show_int(moved.selected_index))
+    print_line("button scene root nodes: " + show_int(scene_nodes(button_scene())))
+    json = render(empty_doc(), web_theme)
+    print_line("render json: " + json)
+    0
+
+fn scene_nodes(doc: SemanticDocument) -> int:
+    mut count = 0
+    for _node in doc.nodes:
+        count = count + 1
+    count
+
+fn show_bool(b: bool) -> Text:
+    if b:
+        "true"
+    else:
+        "false"
+
+fn show_int(value: int) -> Text:
+    if value == 0:
+        "0"
+    else:
+        "n"

@@ -1,0 +1,13 @@
+# veil_role — semantic labels.
+#
+# Open + extensible: a role is just a string, looked up in the
+# theme. No closed enum; user themes add roles freely.
+
+pub data Role: name: Text
+
+pub fn role(name: Text) -> Role:
+    Role{name: name}
+
+pub fn role_button() -> Role = comptime Role{name: "button"}
+pub fn role_heading() -> Role = comptime Role{name: "heading"}
+pub fn role_text() -> Role = comptime Role{name: "text"}

@@ -1,0 +1,8 @@
+name = "veil_resolver"
+version = "0.0.1"
+description = "Veil — deterministic explainable inspectable resolver"
+
+[orbs]
+veil_document = "path:../veil_document"
+veil_theme = "path:../veil_theme"
+veil_display = "path:../veil_display"

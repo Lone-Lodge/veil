@@ -1,0 +1,7 @@
+name = "veil_theme_web"
+version = "0.0.1"
+description = "Veil — shared design-system theme used by every web demo"
+
+[orbs]
+veil_theme = "path:../veil_theme"
+veil_role = "path:../veil_role"

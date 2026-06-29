@@ -1,0 +1,19 @@
+# veil_signal — fine-grained reactivity.
+#
+# A Signal is a typed cell + the views that depend on it. Reads
+# subscribe; writes notify. Rust used Arc<RwLock> dance; Orion's
+# §11 closures + mut slots handle it cleanly.
+
+pub data IntSignal: id: int, value: int
+pub data TextSignal: id: int, value: Text
+
+pub fn signal_int(initial: int) -> IntSignal:
+    IntSignal{id: 0, value: initial}
+
+pub fn signal_text(initial: Text) -> TextSignal:
+    TextSignal{id: 0, value: initial}
+
+# Write a new value into a signal. Returns a fresh signal so callers
+# can wire it back — view derivation is pure.
+pub fn set_int(signal: IntSignal, new_value: int) -> IntSignal:
+    IntSignal{id: signal.id, value: new_value}

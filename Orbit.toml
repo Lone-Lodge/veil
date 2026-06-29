@@ -1,0 +1,8 @@
+[package]
+name = "veil"
+version = "0.0.1"
+description = "Veil — Semantic Document UI: intent + signals + resolver + display list. Pure Orion."
+
+[orbs]
+veil = "path:orbs/veil"
+io = "*"

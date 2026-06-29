@@ -1,0 +1,27 @@
+# veil_showcase — four minimal demo scenes.
+#
+# Rust kept this at 605 lines: per-scene scaffolding, animation state,
+# wasm shim. Orion's port lets each scene be a fn that returns its
+# Document — the resolver + theme do the rest.
+
+use veil_document
+use veil_role
+
+# Demo 1: a single button, sized by its label.
+pub fn button_scene() -> SemanticDocument:
+    nodes = [Node{role: role_button(), props: [NodeProp{key: "label", value: "Click me"}], children: []}]
+    SemanticDocument{root: 0, nodes: nodes}
+
+# Demo 2: vertical stack of three headings.
+pub fn stack_scene() -> SemanticDocument:
+    nodes = [Node{role: role_heading(), props: [NodeProp{key: "text", value: "Hello"}], children: []}, Node{role: role_heading(), props: [NodeProp{key: "text", value: "World"}], children: []}, Node{role: role_heading(), props: [NodeProp{key: "text", value: "Welcome"}], children: []}]
+    SemanticDocument{root: 0, nodes: nodes}
+
+# Demo 3: text content, multi-line wrap.
+pub fn text_scene() -> SemanticDocument:
+    nodes = [Node{role: role_text(), props: [NodeProp{key: "body", value: "The quick brown fox jumps over the lazy dog."}], children: []}]
+    SemanticDocument{root: 0, nodes: nodes}
+
+# Demo 4: empty scene (smoke test for the resolver).
+pub fn empty_scene() -> SemanticDocument:
+    empty_doc()

@@ -1,0 +1,12 @@
+# veil_resolver — document × theme → display list.
+#
+# Deterministic, explainable, inspectable: every produced DrawCmd
+# carries a trace pointer back to (document_node, theme_rule) so the
+# devtools can highlight the source of every pixel.
+
+use veil_document
+use veil_theme
+use veil_display
+
+pub fn resolve(_doc: SemanticDocument, _theme: Theme) -> DisplayList:
+    empty_list()

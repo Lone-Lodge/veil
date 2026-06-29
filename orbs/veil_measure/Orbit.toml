@@ -1,0 +1,6 @@
+name = "veil_measure"
+version = "0.0.1"
+description = "Veil — measure-to-layout (flow + grid + stack)"
+
+[orbs]
+veil_geometry = "path:../veil_geometry"

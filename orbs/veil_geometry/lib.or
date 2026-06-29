@@ -1,0 +1,10 @@
+# veil_geometry — 2D primitives.
+#
+# 72-line Rust crate; one data each in Orion.
+
+pub data Point: x: int, y: int
+pub data Size: width: int, height: int
+pub data Rect: x: int, y: int, width: int, height: int
+
+pub fn rect_contains(rect: Rect, point: Point) -> bool:
+    point.x >= rect.x and point.x < rect.x + rect.width and point.y >= rect.y and point.y < rect.y + rect.height
