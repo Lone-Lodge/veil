@@ -22,7 +22,7 @@ pub fn display_list_json(_list: DisplayList) -> Text:
     # are wired here. The shape is a fixed contract — JS code on the
     # other side reads the same keys whether they come from this orb
     # or the legacy Rust crate, by design.
-    "{\"commands\":[]}"
+    "\{\"commands\":[]\}"
 
 # Generic renderer: document × theme → display list → JSON. The
 # whole web painter sits behind this one fn — no widget classes,
@@ -35,4 +35,4 @@ pub fn render(doc: SemanticDocument, theme: Theme) -> Text:
 # the seq number, returns the JSON for that seq. The actual app
 # state lives behind `slot_get` / `slot_set` so this stays pure.
 pub fn frame(_seq: int) -> Text:
-    "{\"commands\":[]}"
+    "\{\"commands\":[]\}"
