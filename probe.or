@@ -1,0 +1,15 @@
+use io
+use veil
+
+fn main() -> int:
+    doc = scene()
+    theme = default_theme()
+    print_line(render(doc, theme))
+    hit_btn = pick_node(doc, theme, 30, 30)
+    miss = pick_node(doc, theme, 700, 500)
+    print_line("pick heading: {hit_btn}  pick miss: {miss}")
+    0
+
+fn scene() -> SemanticDocument:
+    nodes = [Node{role: role_heading(), props: [NodeProp{key: "text", value: "Veil in the browser"}], children: []}, Node{role: role_button(), props: [NodeProp{key: "label", value: "Click me"}], children: []}]
+    SemanticDocument{root: 0, nodes: nodes}

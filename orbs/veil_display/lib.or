@@ -6,10 +6,12 @@
 
 use veil_geometry
 
+# Colours are CSS-style strings ("#1d1433", "rgba(46,125,224,0.35)") —
+# each backend parses its own. Text/icon carry a pixel size.
 pub enum DrawCmd:
     DrawRect(Rect, Text)
-    DrawText(Point, Text, Text)
-    DrawIcon(Point, Text)
+    DrawText(Point, Text, Text, int)
+    DrawIcon(Point, Text, int)
     DrawPath(Text, Text)
 
 pub data DisplayList: commands: [DrawCmd]

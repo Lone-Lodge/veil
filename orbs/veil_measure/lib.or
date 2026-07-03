@@ -1,9 +1,13 @@
 # veil_measure — layout computation.
 
 use veil_geometry
+use string
 
 # A measured node — final pixel rect after layout pass.
 pub data Measured: node_id: int, rect: Rect
 
-pub fn measure_stub(node_id: int) -> Measured:
-    Measured{node_id: node_id, rect: Rect{x: 0, y: 0, width: 0, height: 0}}
+# Monospace estimate until a real text engine lands: 8px advance,
+# 16px line height. Resolver, pick and painters must all agree on
+# these numbers — they ARE the text engine for now.
+pub fn text_size(content: Text) -> Size:
+    Size{width: str_length(content) * 8, height: 16}

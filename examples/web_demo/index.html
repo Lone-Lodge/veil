@@ -1,0 +1,68 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Veil — browser thin client</title>
+<style>
+  body { margin: 0; font: 13px monospace; background: #0b1220; color: #94a3b8;
+         display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px; }
+  canvas { background: #f1f5f9; border-radius: 8px; cursor: pointer; }
+  #status { min-height: 1em; }
+</style>
+</head>
+<body>
+<div id="status">connecting…</div>
+<canvas id="cv" width="800" height="600"></canvas>
+<script>
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const status = document.getElementById('status');
+
+const ICONS = {
+  sword: '🗡️', shield: '🛡️', bow: '🏹', potion: '🧪', ring: '💍',
+  orb: '🔮', scroll: '📜', key: '🗝️', pickaxe: '⛏️', meat: '🍖',
+  gem: '💎', thread: '🧵', coin: '🪙',
+};
+
+function paint(frame) {
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  ctx.textBaseline = 'top';
+  for (const c of frame.commands) {
+    if (c.kind === 'rect') {
+      ctx.fillStyle = c.color;
+      ctx.fillRect(c.x, c.y, c.w, c.h);
+    } else if (c.kind === 'text') {
+      ctx.fillStyle = c.color;
+      const size = c.size || 13;
+      ctx.font = (size >= 14 ? '600 ' : '') + size + 'px "Segoe UI", system-ui, sans-serif';
+      ctx.fillText(c.text, c.x, c.y + 1);
+    } else if (c.kind === 'icon') {
+      // Icons arrive as NAMES — the backend picks the glyph (emoji today,
+      // textures once the image DrawCmd lands). Keeps non-ASCII out of Orion.
+      const glyph = ICONS[c.icon] || '?';
+      const size = c.size || 24;
+      ctx.font = size + 'px "Segoe UI Emoji", serif';
+      ctx.fillText(glyph, c.x, c.y);
+    }
+  }
+}
+
+const ws = new WebSocket('ws://' + location.hostname + ':7799');
+ws.onopen = () => { status.textContent = 'connected — every pixel below is a Veil DisplayList'; };
+ws.onclose = () => { status.textContent = 'disconnected — is the orbit process running?'; };
+ws.onmessage = e => {
+  try { paint(JSON.parse(e.data)); }
+  catch (err) { status.textContent = 'bad frame: ' + err.message; }
+};
+
+cv.addEventListener('click', ev => {
+  if (ws.readyState !== WebSocket.OPEN) return;
+  const r = cv.getBoundingClientRect();
+  ws.send(JSON.stringify({
+    x: Math.round(ev.clientX - r.left),
+    y: Math.round(ev.clientY - r.top),
+  }));
+});
+</script>
+</body>
+</html>

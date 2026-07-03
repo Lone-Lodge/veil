@@ -1,0 +1,18 @@
+[package]
+name = "veil_web_demo"
+version = "0.0.1"
+description = "Veil in the browser — DisplayList over WebSocket, clicks back to pick_node"
+
+[orbs]
+veil = "path:../../orbs/veil"
+atlas_ws = "path:../../../atlas/orbs/atlas_ws"
+io = "*"
+net = "*"
+json = "*"
+time = "*"
+string = "*"
+bytes = "*"
+format = "*"
+crypto = "*"
+base64 = "*"
+url = "*"

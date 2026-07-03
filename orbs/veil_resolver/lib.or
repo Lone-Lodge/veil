@@ -1,12 +1,64 @@
 # veil_resolver — document × theme → display list.
 #
-# Deterministic, explainable, inspectable: every produced DrawCmd
-# carries a trace pointer back to (document_node, theme_rule) so the
-# devtools can highlight the source of every pixel.
+# Deterministic, explainable, inspectable: layout() exposes the
+# measured rect per node, and resolve/pick_node both consume that
+# single truth — the pixel you see and the pixel you hit-test come
+# from the same pass.
 
 use veil_document
 use veil_theme
 use veil_display
+use veil_geometry
+use veil_measure
 
-pub fn resolve(_doc: SemanticDocument, _theme: Theme) -> DisplayList:
-    empty_list()
+# The text a node presents, whichever prop carries it.
+pub fn node_text(node: Node) -> Text:
+    mut found = ""
+    for prop in node.props:
+        if prop.key == "label":
+            found = prop.value
+        if prop.key == "text":
+            found = prop.value
+        if prop.key == "body":
+            found = prop.value
+    found
+
+# Vertical flow at a fixed left margin. node_id = index in doc.nodes.
+pub fn layout(doc: SemanticDocument, theme: Theme) -> [Measured]:
+    mut out = []
+    mut y = 16
+    n = len(doc.nodes)
+    for i in 0..<n:
+        node = at(doc.nodes, i)
+        style = lookup_style(theme, node.role)
+        size = text_size(node_text(node))
+        w = size.width + style.padding * 2
+        h = size.height + style.padding * 2
+        out = push(out, Measured{node_id: i, rect: Rect{x: 16, y: y, width: w, height: h}})
+        y = y + h + style.gap + 8
+    out
+
+pub fn resolve(doc: SemanticDocument, theme: Theme) -> DisplayList:
+    mut list = empty_list()
+    measured = layout(doc, theme)
+    n = len(doc.nodes)
+    for i in 0..<n:
+        node = at(doc.nodes, i)
+        style = lookup_style(theme, node.role)
+        m = at(measured, i)
+        r = m.rect
+        if style.bg_colour != "":
+            list = push_cmd(list, DrawRect(r, style.bg_colour))
+        pos = Point{x: r.x + style.padding, y: r.y + style.padding}
+        list = push_cmd(list, DrawText(pos, node_text(node), style.fg_colour, 13))
+    list
+
+# Hit-test against the same layout the renderer drew. -1 = miss.
+# Last match wins so later (overlapping) nodes sit "on top".
+pub fn pick_node(doc: SemanticDocument, theme: Theme, x: int, y: int) -> int:
+    measured = layout(doc, theme)
+    mut hit = 0 - 1
+    for m in measured:
+        if rect_contains(m.rect, Point{x: x, y: y}):
+            hit = m.node_id
+    hit

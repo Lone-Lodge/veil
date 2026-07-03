@@ -2,27 +2,52 @@
 #
 # The honest test of the load-bearing platform claim: veil-core runs
 # unchanged in the browser, and a renderer needs only the resolved
-# tree. Pure Orion + raw extern "C" — once Orion targets wasm32, the
-# same source compiles to a `.wasm` whose JS bridge is a handful of
-# extern "c" fns plus one idea: hand the resolved DisplayList to JS
-# as a JSON string read out of linear memory, and a small canvas
-# painter turns it into pixels.
+# tree. The DisplayList travels as JSON — over a websocket today
+# (thin-client: core runs in the local process, the browser is a
+# dumb canvas), out of wasm linear memory tomorrow. Same contract.
 
 use veil_display
 use veil_document
 use veil_resolver
 use veil_theme
+use string
 
-# The web bridge entry point: take a fully-resolved DisplayList,
-# serialise to JSON. JS reads the pointer + length from extern shims
-# and paints into a <canvas>. JSON keeps the contract identical to
-# the TS side without sharing a single line of TS.
-pub fn display_list_json(_list: DisplayList) -> Text:
-    # Full JSON emitter lands once string-byte ops + numeric→text
-    # are wired here. The shape is a fixed contract — JS code on the
-    # other side reads the same keys whether they come from this orb
-    # or the legacy Rust crate, by design.
-    "\{\"commands\":[]\}"
+# Serialise a resolved DisplayList to the fixed JSON contract:
+#   {"commands":[{"kind":"rect","x":..,"y":..,"w":..,"h":..,"color":".."},
+#                {"kind":"text","x":..,"y":..,"text":"..","color":".."}]}
+pub fn display_list_json(list: DisplayList) -> Text:
+    mut body = ""
+    for cmd in list.commands:
+        piece = cmd_json(cmd)
+        if piece != "":
+            body = body + "," + piece
+    if body != "":
+        body = str_slice(body, 1, str_length(body))
+    "\{\"commands\":[" + body + "]\}"
+
+fn cmd_json(cmd: DrawCmd) -> Text:
+    match cmd:
+        DrawRect(r, colour) -> rect_json(r, colour)
+        DrawText(p, content, colour, size) -> text_json(p, content, colour, size)
+        DrawIcon(p, icon, size) -> icon_json(p, icon, size)
+        _ -> ""
+
+fn rect_json(r: Rect, colour: Text) -> Text:
+    x = r.x
+    y = r.y
+    w = r.width
+    h = r.height
+    "\{\"kind\":\"rect\",\"x\":{x},\"y\":{y},\"w\":{w},\"h\":{h},\"color\":\"" + colour + "\"\}"
+
+fn text_json(p: Point, content: Text, colour: Text, size: int) -> Text:
+    x = p.x
+    y = p.y
+    "\{\"kind\":\"text\",\"x\":{x},\"y\":{y},\"size\":{size},\"text\":\"" + content + "\",\"color\":\"" + colour + "\"\}"
+
+fn icon_json(p: Point, icon: Text, size: int) -> Text:
+    x = p.x
+    y = p.y
+    "\{\"kind\":\"icon\",\"x\":{x},\"y\":{y},\"size\":{size},\"icon\":\"" + icon + "\"\}"
 
 # Generic renderer: document × theme → display list → JSON. The
 # whole web painter sits behind this one fn — no widget classes,
@@ -30,9 +55,3 @@ pub fn display_list_json(_list: DisplayList) -> Text:
 pub fn render(doc: SemanticDocument, theme: Theme) -> Text:
     list = resolve(doc, theme)
     display_list_json(list)
-
-# Frame-level entry the JS shell calls each animation frame: takes
-# the seq number, returns the JSON for that seq. The actual app
-# state lives behind `slot_get` / `slot_set` so this stays pure.
-pub fn frame(_seq: int) -> Text:
-    "\{\"commands\":[]\}"

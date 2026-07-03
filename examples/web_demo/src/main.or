@@ -1,0 +1,234 @@
+# web_demo — a real game inventory screen, drawn as a Veil DisplayList
+# and streamed to the browser (thin client). Icons travel as NAMES
+# ("sword", "shield") — the backend picks the glyph; keeps non-ASCII
+# out of Orion source (the interp lexer mangles multi-byte UTF-8).
+#
+# Run from this directory:  orbit run src/main.or main
+# Then open:                http://localhost:7800
+
+use veil
+use atlas_ws
+use io
+use net
+use json
+use time
+use string
+
+# ----- item catalog: [icon, name, rarity, count, desc line 1, desc line 2, stat] -----
+
+fn item(i: int) -> [Text]:
+    if i == 0:
+        return ["sword", "Duskfang", "legendary", "", "A blade quenched in the last", "light of a dying star.", "ATK +48"]
+    if i == 1:
+        return ["shield", "Wardbreaker Aegis", "epic", "", "Shrugs off blows that would", "fell a lesser bearer.", "DEF +31"]
+    if i == 2:
+        return ["bow", "Whisperwind Bow", "rare", "", "Arrows loosed in silence", "strike twice as deep.", "ATK +19"]
+    if i == 3:
+        return ["potion", "Greater Healing Draught", "uncommon", "x7", "Restores 250 vitality over", "8 seconds.", "HEAL 250"]
+    if i == 4:
+        return ["ring", "Signet of the Deep", "epic", "", "The sea remembers those", "who wear its mark.", "MANA +24"]
+    if i == 5:
+        return ["orb", "Orb of Second Sight", "rare", "", "Reveals what walls and", "shadows try to hide.", "INT +12"]
+    if i == 6:
+        return ["scroll", "Scroll of Recall", "uncommon", "x3", "Returns you to the last", "sanctum you attuned.", "UTILITY"]
+    if i == 7:
+        return ["key", "Gilded Vault Key", "rare", "x2", "Opens gilded strongboxes", "found in the Underreach.", "KEY"]
+    if i == 8:
+        return ["pickaxe", "Ironbite Pickaxe", "common", "", "Reliable. Unremarkable.", "Gets the ore out.", "TOOL"]
+    if i == 9:
+        return ["meat", "Traveler's Ration", "common", "x12", "Restores 40 stamina.", "Tastes of long roads.", "STAM +40"]
+    if i == 10:
+        return ["gem", "Flawless Voidgem", "legendary", "", "It hums when held near", "things that should not be.", "SOCKET"]
+    if i == 11:
+        return ["thread", "Spidersilk Bundle", "uncommon", "x24", "Crafting material prized", "by shadowweavers.", "MATERIAL"]
+    []
+
+fn rarity_color(rarity: Text) -> Text:
+    if rarity == "legendary":
+        return "#e8a33d"
+    if rarity == "epic":
+        return "#a55fe8"
+    if rarity == "rare":
+        return "#3d8fe8"
+    if rarity == "uncommon":
+        return "#3dbf6e"
+    "#565068"
+
+fn rarity_glow(rarity: Text) -> Text:
+    if rarity == "legendary":
+        return "rgba(232,163,61,0.30)"
+    if rarity == "epic":
+        return "rgba(165,95,232,0.30)"
+    if rarity == "rare":
+        return "rgba(61,143,232,0.30)"
+    if rarity == "uncommon":
+        return "rgba(61,191,110,0.30)"
+    "rgba(120,120,140,0.22)"
+
+# ----- grid geometry (shared by render and hit-test — one truth) -----
+
+fn grid_x() -> int: 48
+fn grid_y() -> int: 96
+fn slot_size() -> int: 64
+fn slot_pitch() -> int: 76
+fn grid_cols() -> int: 6
+fn grid_rows() -> int: 4
+
+# ----- scene -----
+
+fn rect_at(x: int, y: int, w: int, h: int, colour: Text) -> DrawCmd:
+    DrawRect(Rect{x: x, y: y, width: w, height: h}, colour)
+
+fn text_at(x: int, y: int, content: Text, colour: Text, size: int) -> DrawCmd:
+    DrawText(Point{x: x, y: y}, content, colour, size)
+
+fn icon_at(x: int, y: int, icon: Text, size: int) -> DrawCmd:
+    DrawIcon(Point{x: x, y: y}, icon, size)
+
+fn draw_header(list0: DisplayList) -> DisplayList:
+    mut list = list0
+    list = push_cmd(list, text_at(48, 26, "CHARACTER", "#6f6590", 14))
+    list = push_cmd(list, text_at(178, 26, "INVENTORY", "#e8c86a", 14))
+    list = push_cmd(list, rect_at(178, 46, 84, 2, "#e8c86a"))
+    list = push_cmd(list, text_at(308, 26, "SKILLS", "#6f6590", 14))
+    list = push_cmd(list, text_at(398, 26, "MAP", "#6f6590", 14))
+    list = push_cmd(list, icon_at(650, 24, "coin", 16))
+    list = push_cmd(list, text_at(676, 26, "2,164", "#e8c86a", 14))
+    list = push_cmd(list, rect_at(40, 64, 720, 1, "rgba(150,120,220,0.25)"))
+    list
+
+fn draw_slot(list0: DisplayList, index: int, selected: int) -> DisplayList:
+    mut list = list0
+    col = index % grid_cols()
+    row = index / grid_cols()
+    x = grid_x() + col * slot_pitch()
+    y = grid_y() + row * slot_pitch()
+    fields = item(index)
+    filled = len(fields) > 0
+    mut frame_colour = "#2a2140"
+    mut fill_colour = "#151022"
+    if filled:
+        frame_colour = rarity_color(at(fields, 2))
+        fill_colour = "#1d1433"
+    s = slot_size()
+    if index == selected and filled:
+        glow = rarity_glow(at(fields, 2))
+        list = push_cmd(list, rect_at(x - 5, y - 5, s + 10, s + 10, glow))
+    list = push_cmd(list, rect_at(x - 2, y - 2, s + 4, s + 4, frame_colour))
+    list = push_cmd(list, rect_at(x, y, s, s, fill_colour))
+    if filled:
+        list = push_cmd(list, icon_at(x + 13, y + 11, at(fields, 0), 36))
+        count = at(fields, 3)
+        if count != "":
+            list = push_cmd(list, text_at(x + 36, y + 47, count, "#cbd5e1", 12))
+    list
+
+fn draw_detail(list0: DisplayList, selected: int) -> DisplayList:
+    mut list = list0
+    px = 528
+    py = 96
+    pw = 232
+    ph = 292
+    list = push_cmd(list, rect_at(px - 1, py - 1, pw + 2, ph + 2, "#3a2a5e"))
+    list = push_cmd(list, rect_at(px, py, pw, ph, "rgba(22,14,40,0.96)"))
+    fields = item(selected)
+    if len(fields) == 0:
+        list = push_cmd(list, text_at(px + 20, py + 130, "Select an item", "#6f6590", 13))
+        return list
+    rarity = at(fields, 2)
+    rcolour = rarity_color(rarity)
+    list = push_cmd(list, rect_at(px + 20, py + 18, 56, 56, "#151022"))
+    list = push_cmd(list, rect_at(px + 20, py + 18, 56, 3, rcolour))
+    list = push_cmd(list, icon_at(px + 30, py + 28, at(fields, 0), 34))
+    list = push_cmd(list, text_at(px + 20, py + 92, at(fields, 1), rcolour, 16))
+    list = push_cmd(list, text_at(px + 20, py + 116, rarity, rcolour, 11))
+    list = push_cmd(list, rect_at(px + 20, py + 138, pw - 40, 1, "rgba(150,120,220,0.25)"))
+    list = push_cmd(list, text_at(px + 20, py + 154, at(fields, 4), "#a99fc0", 12))
+    list = push_cmd(list, text_at(px + 20, py + 172, at(fields, 5), "#a99fc0", 12))
+    list = push_cmd(list, text_at(px + 20, py + 206, at(fields, 6), "#e0e6f0", 14))
+    list = push_cmd(list, rect_at(px + 20, py + 240, pw - 40, 30, "#241940"))
+    list = push_cmd(list, text_at(px + 78, py + 248, "EQUIP", "#e8c86a", 13))
+    list
+
+fn frame(selected: int, note: Text) -> Text:
+    mut list = empty_list()
+    list = push_cmd(list, rect_at(0, 0, 800, 600, "#0d0716"))
+    list = push_cmd(list, rect_at(0, 0, 800, 180, "rgba(120,60,200,0.05)"))
+    list = push_cmd(list, rect_at(0, 420, 800, 180, "rgba(30,10,60,0.35)"))
+    list = draw_header(list)
+    total = grid_cols() * grid_rows()
+    for i in 0..<total:
+        list = draw_slot(list, i, selected)
+    list = draw_detail(list, selected)
+    list = push_cmd(list, rect_at(40, 556, 720, 1, "rgba(150,120,220,0.25)"))
+    list = push_cmd(list, text_at(48, 570, note, "#6f6590", 12))
+    list = push_cmd(list, text_at(560, 570, "every pixel = Veil DisplayList", "#463d60", 11))
+    display_list_json(list)
+
+# ----- hit-testing (same numbers the renderer used) -----
+
+fn slot_from_click(x: int, y: int) -> int:
+    gx = x - grid_x()
+    gy = y - grid_y()
+    if gx < 0 or gy < 0:
+        return 0 - 1
+    col = gx / slot_pitch()
+    row = gy / slot_pitch()
+    if col >= grid_cols() or row >= grid_rows():
+        return 0 - 1
+    if gx % slot_pitch() >= slot_size() or gy % slot_pitch() >= slot_size():
+        return 0 - 1
+    row * grid_cols() + col
+
+fn main() -> int:
+    page = read_file("index.html")
+    http_server = tcp_listen(7800)
+    ws_server = ws_listen(7799)
+    print_line("veil inventory demo")
+    print_line("  page: http://localhost:7800")
+
+    mut clients = []
+    mut selected = 0
+    mut note = "Click a slot to inspect it"
+    mut last_sent = ""
+
+    loop:
+        conn = tcp_accept(http_server)
+        if conn >= 0:
+            _req = tcp_recv(conn, 8192)
+            response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n" + page
+            tcp_send(conn, response)
+            tcp_close(conn)
+
+        fresh = ws_accept(ws_server)
+        if fresh >= 0:
+            clients = push(clients, fresh)
+            last_sent = ""
+
+        n = len(clients)
+        for i in 0..<n:
+            msg = ws_recv_text(at(clients, i))
+            if msg != "":
+                parsed = json_parse(msg)
+                mx = get_int(parsed, "x")
+                my = get_int(parsed, "y")
+                hit = slot_from_click(mx, my)
+                if hit >= 0:
+                    fields = item(hit)
+                    if len(fields) > 0:
+                        selected = hit
+                        name = at(fields, 1)
+                        note = "Inspecting: {name}"
+                    if len(fields) == 0:
+                        note = "Empty slot"
+                if hit < 0:
+                    if my < 60:
+                        note = "Only INVENTORY is wired in this demo"
+
+        current = frame(selected, note)
+        if current != last_sent:
+            if len(clients) > 0:
+                clients = ws_broadcast_text(clients, current)
+                last_sent = current
+        sleep(0.03)
+    0
