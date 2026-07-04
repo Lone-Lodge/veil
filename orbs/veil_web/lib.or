@@ -27,22 +27,22 @@ pub fn display_list_json(list: DisplayList) -> Text:
 
 fn cmd_json(cmd: DrawCmd) -> Text:
     match cmd:
-        DrawRect(r, colour) -> rect_json(r, colour)
-        DrawText(p, content, colour, size) -> text_json(p, content, colour, size)
+        DrawRect(r, colour, src) -> rect_json(r, colour, src)
+        DrawText(p, content, colour, size, src) -> text_json(p, content, colour, size, src)
         DrawIcon(p, icon, size) -> icon_json(p, icon, size)
         _ -> ""
 
-fn rect_json(r: Rect, colour: Text) -> Text:
+fn rect_json(r: Rect, colour: Text, src: int) -> Text:
     x = r.x
     y = r.y
     w = r.width
     h = r.height
-    "\{\"kind\":\"rect\",\"x\":{x},\"y\":{y},\"w\":{w},\"h\":{h},\"color\":\"" + colour + "\"\}"
+    "\{\"kind\":\"rect\",\"x\":{x},\"y\":{y},\"w\":{w},\"h\":{h},\"src\":{src},\"color\":\"" + colour + "\"\}"
 
-fn text_json(p: Point, content: Text, colour: Text, size: int) -> Text:
+fn text_json(p: Point, content: Text, colour: Text, size: int, src: int) -> Text:
     x = p.x
     y = p.y
-    "\{\"kind\":\"text\",\"x\":{x},\"y\":{y},\"size\":{size},\"text\":\"" + content + "\",\"color\":\"" + colour + "\"\}"
+    "\{\"kind\":\"text\",\"x\":{x},\"y\":{y},\"size\":{size},\"src\":{src},\"text\":\"" + content + "\",\"color\":\"" + colour + "\"\}"
 
 fn icon_json(p: Point, icon: Text, size: int) -> Text:
     x = p.x

@@ -77,10 +77,10 @@ fn grid_rows() -> int: 4
 # ----- scene -----
 
 fn rect_at(x: int, y: int, w: int, h: int, colour: Text) -> DrawCmd:
-    DrawRect(Rect{x: x, y: y, width: w, height: h}, colour)
+    DrawRect(Rect{x: x, y: y, width: w, height: h}, colour, 0)
 
 fn text_at(x: int, y: int, content: Text, colour: Text, size: int) -> DrawCmd:
-    DrawText(Point{x: x, y: y}, content, colour, size)
+    DrawText(Point{x: x, y: y}, content, colour, size, 0)
 
 fn icon_at(x: int, y: int, icon: Text, size: int) -> DrawCmd:
     DrawIcon(Point{x: x, y: y}, icon, size)

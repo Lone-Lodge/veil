@@ -8,9 +8,13 @@ use veil_geometry
 
 # Colours are CSS-style strings ("#1d1433", "rgba(46,125,224,0.35)") —
 # each backend parses its own. Text/icon carry a pixel size.
+# Rect/Text carry a trailing PROVENANCE tag: the entity (or rule) id
+# that produced the command, 0 = untagged. This is what makes the
+# display list ADDRESSABLE — veil edit-mode hit-tests a pixel, reads
+# the tag, and knows which spawn line in which script to rewrite.
 pub enum DrawCmd:
-    DrawRect(Rect, Text)
-    DrawText(Point, Text, Text, int)
+    DrawRect(Rect, Text, int)
+    DrawText(Point, Text, Text, int, int)
     DrawIcon(Point, Text, int)
     DrawPath(Text, Text)
 

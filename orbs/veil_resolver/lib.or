@@ -47,10 +47,12 @@ pub fn resolve(doc: SemanticDocument, theme: Theme) -> DisplayList:
         style = lookup_style(theme, node.role)
         m = at(measured, i)
         r = m.rect
+        # Provenance = node index: pick_node and the display list agree
+        # on identity for free.
         if style.bg_colour != "":
-            list = push_cmd(list, DrawRect(r, style.bg_colour))
+            list = push_cmd(list, DrawRect(r, style.bg_colour, i))
         pos = Point{x: r.x + style.padding, y: r.y + style.padding}
-        list = push_cmd(list, DrawText(pos, node_text(node), style.fg_colour, 13))
+        list = push_cmd(list, DrawText(pos, node_text(node), style.fg_colour, 13, i))
     list
 
 # Hit-test against the same layout the renderer drew. -1 = miss.

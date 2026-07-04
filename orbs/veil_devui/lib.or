@@ -15,9 +15,9 @@ pub fn devui_overlay(list: DisplayList, lines: [Text]) -> DisplayList:
 fn overlay_rows(list: DisplayList, lines: [Text]) -> DisplayList:
     n = len(lines)
     panel = Rect{x: 6, y: 6, width: 230, height: n * 18 + 12}
-    mut out = push_cmd(list, DrawRect(panel, "black"))
+    mut out = push_cmd(list, DrawRect(panel, "black", 0))
     for i in 0..<n:
-        out = push_cmd(out, DrawText(Point{x: 14, y: 14 + i * 18}, line_at(lines, i), "green", 12))
+        out = push_cmd(out, DrawText(Point{x: 14, y: 14 + i * 18}, line_at(lines, i), "green", 12, 0))
     out
 
 fn line_at(lines: [Text], i: int) -> Text:
