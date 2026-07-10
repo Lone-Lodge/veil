@@ -12,10 +12,14 @@ pub fn button_scene() -> SemanticDocument:
     nodes = [Node{role: role_button(), props: [NodeProp{key: "label", value: "Click me"}], children: []}]
     SemanticDocument{root: 0, nodes: nodes}
 
-# Demo 2: vertical stack of three headings.
+# Demo 2: a panel CONTAINING three headings — a real tree (root=panel,
+# children=[1,2,3]), so the resolver indents the headings under the panel.
 pub fn stack_scene() -> SemanticDocument:
-    nodes = [Node{role: role_heading(), props: [NodeProp{key: "text", value: "Hello"}], children: []}, Node{role: role_heading(), props: [NodeProp{key: "text", value: "World"}], children: []}, Node{role: role_heading(), props: [NodeProp{key: "text", value: "Welcome"}], children: []}]
-    SemanticDocument{root: 0, nodes: nodes}
+    panel = Node{role: role("panel"), props: [], children: [1, 2, 3]}
+    h1 = Node{role: role_heading(), props: [NodeProp{key: "text", value: "Hello"}], children: []}
+    h2 = Node{role: role_heading(), props: [NodeProp{key: "text", value: "World"}], children: []}
+    h3 = Node{role: role_heading(), props: [NodeProp{key: "text", value: "Welcome"}], children: []}
+    SemanticDocument{root: 0, nodes: [panel, h1, h2, h3]}
 
 # Demo 3: text content, multi-line wrap.
 pub fn text_scene() -> SemanticDocument:

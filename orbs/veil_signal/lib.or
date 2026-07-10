@@ -1,19 +1,60 @@
 # veil_signal — fine-grained reactivity.
 #
-# A Signal is a typed cell + the views that depend on it. Reads
-# subscribe; writes notify. Rust used Arc<RwLock> dance; Orion's
-# §11 closures + mut slots handle it cleanly.
+# A signal is an id-addressed cell in a store; a write marks it dirty.
+# Reactivity here is PULL-based: a consumer re-derives its view when the
+# store `any_dirty`, then `clear_dirty`. The dirty set IS the notification —
+# no subscribe/notify bookkeeping, no Arc<RwLock> dance. This matches the
+# engine's when-rule dirty gating: nothing recomputes while nothing changed.
 
-pub data IntSignal: id: int, value: int
-pub data TextSignal: id: int, value: Text
+# One reactive int cell. `dirty` is set on creation and every write, cleared
+# by clear_dirty once a derivation has consumed it.
+pub data IntCell: id: int, value: int, dirty: bool
 
-pub fn signal_int(initial: int) -> IntSignal:
-    IntSignal{id: 0, value: initial}
+# The signal store: all cells + the next id to hand out.
+pub data SignalStore: cells: [IntCell], next_id: int
 
-pub fn signal_text(initial: Text) -> TextSignal:
-    TextSignal{id: 0, value: initial}
+pub fn empty_store() -> SignalStore:
+    SignalStore{cells: [], next_id: 1}
 
-# Write a new value into a signal. Returns a fresh signal so callers
-# can wire it back — view derivation is pure.
-pub fn set_int(signal: IntSignal, new_value: int) -> IntSignal:
-    IntSignal{id: signal.id, value: new_value}
+# Allocating a signal grows the store AND yields the new id — paired so the
+# caller threads both and derivation stays pure.
+pub data SignalAlloc: store: SignalStore, id: int
+
+pub fn signal_int(store: SignalStore, initial: int) -> SignalAlloc:
+    id = store.next_id
+    cell = IntCell{id: id, value: initial, dirty: true}
+    SignalAlloc{store: SignalStore{cells: push(store.cells, cell), next_id: id + 1}, id: id}
+
+# Read a signal by id. Missing id reads 0 (a signal that was never allocated
+# is indistinguishable from one holding 0 — the graceful default).
+pub fn signal_get(store: SignalStore, id: int) -> int:
+    mut found = 0
+    for cell in store.cells:
+        if cell.id == id:
+            found = cell.value
+    found
+
+# Write a new value and mark the cell dirty. Unknown id is a no-op.
+pub fn signal_set(store: SignalStore, id: int, new_value: int) -> SignalStore:
+    mut out = []
+    for cell in store.cells:
+        if cell.id == id:
+            out = push(out, IntCell{id: cell.id, value: new_value, dirty: true})
+        else:
+            out = push(out, cell)
+    SignalStore{cells: out, next_id: store.next_id}
+
+# Any cell changed since the last clear? — the re-derive gate.
+pub fn any_dirty(store: SignalStore) -> bool:
+    mut d = false
+    for cell in store.cells:
+        if cell.dirty:
+            d = true
+    d
+
+# Consume the notifications: a derivation calls this after re-reading.
+pub fn clear_dirty(store: SignalStore) -> SignalStore:
+    mut out = []
+    for cell in store.cells:
+        out = push(out, IntCell{id: cell.id, value: cell.value, dirty: false})
+    SignalStore{cells: out, next_id: store.next_id}
