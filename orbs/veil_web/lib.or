@@ -10,19 +10,22 @@ use veil_display
 use veil_document
 use veil_resolver
 use veil_theme
-use string
-
 # Serialise a resolved DisplayList to the fixed JSON contract:
 #   {"commands":[{"kind":"rect","x":..,"y":..,"w":..,"h":..,"color":".."},
 #                {"kind":"text","x":..,"y":..,"text":"..","color":".."}]}
+# A `first` flag joins pieces with commas without a leading one — no slice
+# needed (the text orb has no substring, and this reads clearer anyway).
 pub fn display_list_json(list: DisplayList) -> Text:
     mut body = ""
+    mut first = true
     for cmd in list.commands:
         piece = cmd_json(cmd)
         if piece != "":
-            body = body + "," + piece
-    if body != "":
-        body = str_slice(body, 1, str_length(body))
+            if first:
+                body = piece
+                first = false
+            else:
+                body = body + "," + piece
     "\{\"commands\":[" + body + "]\}"
 
 fn cmd_json(cmd: DrawCmd) -> Text:
