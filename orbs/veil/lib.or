@@ -18,5 +18,6 @@ use veil_web
 use veil_theme_web
 use veil_inventory
 use veil_showcase
+use veil_devui
 
 pub fn version() -> Text = comptime "0.0.1"

@@ -4,4 +4,4 @@ description = "Veil — measure-to-layout (flow + grid + stack)"
 
 [orbs]
 veil_geometry = "path:../veil_geometry"
-string = "*"
+text = "path:../../../orion/orbs/text"

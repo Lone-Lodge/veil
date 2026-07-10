@@ -1,0 +1,7 @@
+name = "veil_devui"
+version = "0.0.1"
+description = "Veil — dev overlay: annotate a display list with debug text rows"
+
+[orbs]
+veil_display = "path:../veil_display"
+veil_geometry = "path:../veil_geometry"

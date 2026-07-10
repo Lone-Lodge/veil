@@ -52,9 +52,13 @@ fn main() -> int:
 
     # classify covers every interaction kind.
     print_line("classify mouse_up (expect release): " + itag(classify("mouse_up", 5, 6)))
-    print_line("classify scroll (expect scroll): " + itag(classify("scroll", 0, 3)))
+    print_line("classify scroll (expect scroll): " + itag(classify("scroll", 7, 0)))
     print_line("classify key_down (expect key): " + itag(classify("key_down", 65, 0)))
     print_line("classify mouse_down (expect press): " + itag(classify("mouse_down", 5, 6)))
+    # Payloads land in the documented axis: scroll delta and key code both
+    # ride `x` (parallel scalar events); a pointer press keeps (x,y).
+    print_line("scroll delta (expect 7): " + show_int(iscalar(classify("scroll", 7, 0))))
+    print_line("key code (expect 65): " + show_int(iscalar(classify("key_down", 65, 0))))
 
     # Tree resolver: a panel with 3 heading children — headings indent under
     # it. 5 commands (panel rect+text + 3 heading texts); a pick at the
@@ -76,6 +80,15 @@ fn itag(i: Interaction) -> Text:
         ReleaseAt(_, _) -> "release"
         KeyPress(_) -> "key"
         Scroll(_) -> "scroll"
+
+# The scalar payload of a non-pointer intent (key code / scroll delta),
+# or the x pixel of a pointer one — the axis classify documents for `x`.
+fn iscalar(i: Interaction) -> int:
+    match i:
+        PressAt(x, _) -> x
+        ReleaseAt(x, _) -> x
+        KeyPress(k) -> k
+        Scroll(d) -> d
 
 fn scene_nodes(doc: SemanticDocument) -> int:
     mut count = 0
