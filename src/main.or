@@ -1,5 +1,5 @@
 use veil
-use io
+use os
 
 fn main() -> int:
     print_line("Veil — pure Orion")
@@ -27,6 +27,18 @@ fn main() -> int:
     print_line("button scene root nodes: " + show_int(scene_nodes(button_scene())))
     json = render(empty_doc(), web_theme)
     print_line("render json: " + json)
+
+    # Full pipeline on a NON-empty doc: resolve a button (bg + label) and
+    # hit-test it against the same layout. A button emits 2 commands
+    # (DrawRect + DrawText); (30,30) lands inside it, (700,500) misses.
+    btn = button_scene()
+    dt = default_theme()
+    mut dc = 0
+    for _c in resolve(btn, dt).commands:
+        dc = dc + 1
+    print_line("button scene draw commands (expect 2): " + show_int(dc))
+    print_line("pick at (30,30) (expect node 0): " + show_int(pick_node(btn, dt, 30, 30)))
+    print_line("pick at (700,500) is miss (expect true): " + show_bool(pick_node(btn, dt, 700, 500) < 0))
     0
 
 fn scene_nodes(doc: SemanticDocument) -> int:
@@ -45,4 +57,13 @@ fn show_int(value: int) -> Text:
     if value == 0:
         "0"
     else:
-        "n"
+        digits(value)
+
+fn digits(value: int) -> Text:
+    if value == 0:
+        ""
+    else:
+        digits(value / 10) + glyph(value - (value / 10) * 10)
+
+fn glyph(d: int) -> Text:
+    if d == 0 then "0" else if d == 1 then "1" else if d == 2 then "2" else if d == 3 then "3" else if d == 4 then "4" else if d == 5 then "5" else if d == 6 then "6" else if d == 7 then "7" else if d == 8 then "8" else "9"

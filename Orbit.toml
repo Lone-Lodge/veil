@@ -5,6 +5,5 @@ description = "Veil — Semantic Document UI: intent + signals + resolver + disp
 
 [orbs]
 veil = "path:orbs/veil"
-io = "*"
-string = "*"
-bytes = "*"
+os = "*"
+text = "path:../orion/orbs/text"
