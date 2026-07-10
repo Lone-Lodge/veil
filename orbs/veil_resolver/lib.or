@@ -23,20 +23,36 @@ pub fn node_text(node: Node) -> Text:
             found = prop.value
     found
 
-# Vertical flow at a fixed left margin. node_id = index in doc.nodes.
+# Tree flow: a DFS from `doc.root` places each node, then its children one
+# indent step in and stacked below — so the document TREE (root + children),
+# not array order, drives layout. node_id = index in doc.nodes; every node
+# gets a slot, and any node not reachable from root keeps a zero rect (it is
+# not in the document, so resolve/pick skip it).
 pub fn layout(doc: SemanticDocument, theme: Theme) -> [Measured]:
-    mut out = []
-    mut y = 16
     n = len(doc.nodes)
+    mut out = []
     for i in 0..<n:
-        node = at(doc.nodes, i)
-        style = lookup_style(theme, node.role)
-        size = text_size(node_text(node))
-        w = size.width + style.padding * 2
-        h = size.height + style.padding * 2
-        out = push(out, Measured{node_id: i, rect: Rect{x: 16, y: y, width: w, height: h}})
-        y = y + h + style.gap + 8
-    out
+        out = push(out, Measured{node_id: i, rect: Rect{x: 0, y: 0, width: 0, height: 0}})
+    if n == 0:
+        out
+    else:
+        layout_node(doc, theme, doc.root, 16, 16, out).measured
+
+data LayoutAcc: measured: [Measured], y: int
+
+# Place one node at (x, y), then recurse into its children indented (+16 x)
+# and stacked below. Returns the filled slots + the y past the whole subtree.
+fn layout_node(doc: SemanticDocument, theme: Theme, node_id: int, x: int, y: int, measured: [Measured]) -> LayoutAcc:
+    node = at(doc.nodes, node_id)
+    style = lookup_style(theme, node.role)
+    size = text_size(node_text(node))
+    w = size.width + style.padding * 2
+    h = size.height + style.padding * 2
+    placed = set(measured, node_id, Measured{node_id: node_id, rect: Rect{x: x, y: y, width: w, height: h}})
+    mut acc = LayoutAcc{measured: placed, y: y + h + style.gap + 8}
+    for child in node.children:
+        acc = layout_node(doc, theme, child, x + 16, acc.y, acc.measured)
+    acc
 
 pub fn resolve(doc: SemanticDocument, theme: Theme) -> DisplayList:
     mut list = empty_list()
@@ -47,12 +63,14 @@ pub fn resolve(doc: SemanticDocument, theme: Theme) -> DisplayList:
         style = lookup_style(theme, node.role)
         m = at(measured, i)
         r = m.rect
-        # Provenance = node index: pick_node and the display list agree
-        # on identity for free.
-        if style.bg_colour != "":
-            list = push_cmd(list, DrawRect(r, style.bg_colour, i))
-        pos = Point{x: r.x + style.padding, y: r.y + style.padding}
-        list = push_cmd(list, DrawText(pos, node_text(node), style.fg_colour, 13, i))
+        # Skip nodes not reached by the DFS (zero rect) — they aren't in the
+        # tree, so they draw nothing. Provenance = node index: pick_node and
+        # the display list agree on identity for free.
+        if r.height > 0:
+            if style.bg_colour != "":
+                list = push_cmd(list, DrawRect(r, style.bg_colour, i))
+            pos = Point{x: r.x + style.padding, y: r.y + style.padding}
+            list = push_cmd(list, DrawText(pos, node_text(node), style.fg_colour, 13, i))
     list
 
 # Hit-test against the same layout the renderer drew. -1 = miss.

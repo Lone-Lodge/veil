@@ -39,7 +39,43 @@ fn main() -> int:
     print_line("button scene draw commands (expect 2): " + show_int(dc))
     print_line("pick at (30,30) (expect node 0): " + show_int(pick_node(btn, dt, 30, 30)))
     print_line("pick at (700,500) is miss (expect true): " + show_bool(pick_node(btn, dt, 700, 500) < 0))
+
+    # Reactive signals: a write marks the store dirty; clear resets it.
+    a = signal_int(empty_store(), 10)
+    print_line("signal initial (expect 10): " + show_int(signal_get(a.store, a.id)))
+    print_line("dirty after alloc (expect true): " + show_bool(any_dirty(a.store)))
+    cleared = clear_dirty(a.store)
+    print_line("dirty after clear (expect false): " + show_bool(any_dirty(cleared)))
+    written = signal_set(cleared, a.id, 42)
+    print_line("signal after set (expect 42): " + show_int(signal_get(written, a.id)))
+    print_line("dirty after set (expect true): " + show_bool(any_dirty(written)))
+
+    # classify covers every interaction kind.
+    print_line("classify mouse_up (expect release): " + itag(classify("mouse_up", 5, 6)))
+    print_line("classify scroll (expect scroll): " + itag(classify("scroll", 0, 3)))
+    print_line("classify key_down (expect key): " + itag(classify("key_down", 65, 0)))
+    print_line("classify mouse_down (expect press): " + itag(classify("mouse_down", 5, 6)))
+
+    # Tree resolver: a panel with 3 heading children — headings indent under
+    # it. 5 commands (panel rect+text + 3 heading texts); a pick at the
+    # indented child column lands on heading node 1.
+    st = stack_scene()
+    print_line("stack scene draw commands (expect 5): " + show_int(cmd_count(resolve(st, dt))))
+    print_line("pick indented child at (35,90) (expect node 1): " + show_int(pick_node(st, dt, 35, 90)))
     0
+
+fn cmd_count(list: DisplayList) -> int:
+    mut c = 0
+    for _cmd in list.commands:
+        c = c + 1
+    c
+
+fn itag(i: Interaction) -> Text:
+    match i:
+        PressAt(_, _) -> "press"
+        ReleaseAt(_, _) -> "release"
+        KeyPress(_) -> "key"
+        Scroll(_) -> "scroll"
 
 fn scene_nodes(doc: SemanticDocument) -> int:
     mut count = 0
