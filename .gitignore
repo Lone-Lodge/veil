@@ -1,0 +1,13 @@
+target/
+dist/
+build/
+*.exe
+*.dll
+*.obj
+*.ll
+*.pdb
+.vscode/
+.idea/
+*.log
+*~
+*.swp

@@ -1,0 +1,61 @@
+# veil_web — browser backend for Veil.
+#
+# The honest test of the load-bearing platform claim: veil-core runs
+# unchanged in the browser, and a renderer needs only the resolved
+# tree. The DisplayList travels as JSON — over a websocket today
+# (thin-client: core runs in the local process, the browser is a
+# dumb canvas), out of wasm linear memory tomorrow. Same contract.
+
+use ori_display
+use veil_document
+use veil_resolver
+use veil_theme
+# Serialise a resolved DisplayList to the fixed JSON contract:
+#   {"commands":[{"kind":"rect","x":..,"y":..,"w":..,"h":..,"color":".."},
+#                {"kind":"text","x":..,"y":..,"text":"..","color":".."}]}
+# A `first` flag joins pieces with commas without a leading one — no slice
+# needed (the text orb has no substring, and this reads clearer anyway).
+public define display_list_json(list: DisplayList) -> text:
+    edit body = ""
+    edit first = true
+    loop cmd in list.commands:
+        piece = cmd_json(cmd)
+        if piece != "":
+            if first:
+                body = piece
+                first = false
+            else:
+                body = body + "," + piece
+    "\{\"commands\":[" + body + "]\}"
+
+define cmd_json(cmd: DrawCmd) -> text:
+    choose cmd:
+        DrawRect(r, colour, src) -> rect_json(r, colour, src)
+        DrawRoundRect(r, colour, _radius, src) -> rect_json(r, colour, src)
+        DrawText(p, content, colour, size, src) -> text_json(p, content, colour, size, src)
+        DrawIcon(p, icon, size, src) -> icon_json(p, icon, size, src)
+        _ -> ""
+
+define rect_json(r: Rect, colour: text, src: int) -> text:
+    x = r.x
+    y = r.y
+    w = r.wide
+    h = r.high
+    "\{\"kind\":\"rect\",\"x\":{x},\"y\":{y},\"w\":{w},\"h\":{h},\"src\":{src},\"color\":\"" + colour + "\"\}"
+
+define text_json(p: Point, content: text, colour: text, size: int, src: int) -> text:
+    x = p.x
+    y = p.y
+    "\{\"kind\":\"text\",\"x\":{x},\"y\":{y},\"size\":{size},\"src\":{src},\"text\":\"" + content + "\",\"color\":\"" + colour + "\"\}"
+
+define icon_json(p: Point, icon: text, size: int, src: int) -> text:
+    x = p.x
+    y = p.y
+    "\{\"kind\":\"icon\",\"x\":{x},\"y\":{y},\"size\":{size},\"src\":{src},\"icon\":\"" + icon + "\"\}"
+
+# Generic renderer: document × theme → display list → JSON. The
+# whole web painter sits behind this one fn — no widget classes,
+# no DOM, just data.
+public define render(doc: SemanticDocument, theme: Theme) -> text:
+    list = resolve(doc, theme)
+    display_list_json(list)

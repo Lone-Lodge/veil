@@ -1,0 +1,23 @@
+# veil_interaction — input → intent.
+
+public type Interaction:
+    PressAt(int, int)
+    ReleaseAt(int, int)
+    KeyPress(int)
+    Scroll(int)
+
+# Map a raw host event to an intent. `x` carries the key code for key
+# events and the delta for scrolls; `x,y` are pixels for pointer events.
+# Every Interaction variant is reachable — the resolver's pick_node then
+# turns a PressAt/ReleaseAt into the node it hit.
+public define classify(kind: text, x: int, y: int) -> Interaction:
+    if kind == "key_down":
+        KeyPress(x)
+    else:
+        if kind == "mouse_up" or kind == "release":
+            ReleaseAt(x, y)
+        else:
+            if kind == "scroll":
+                Scroll(x)
+            else:
+                PressAt(x, y)

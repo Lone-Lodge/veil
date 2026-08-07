@@ -1,0 +1,7 @@
+name = "veil_measure"
+version = "0.0.1"
+description = "Veil — measure-to-layout (flow + grid + stack)"
+
+[orbs]
+ori_geometry = "path:../../../orion/orbs/ori_geometry"
+text = "path:../../../orion/orbs/text"

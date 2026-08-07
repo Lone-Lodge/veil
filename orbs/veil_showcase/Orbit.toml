@@ -1,0 +1,7 @@
+name = "veil_showcase"
+version = "0.0.1"
+description = "Veil — four minimal demo scenes (one idea each)"
+
+[orbs]
+veil_document = "path:../veil_document"
+veil_role = "path:../veil_role"

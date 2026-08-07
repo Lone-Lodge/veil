@@ -1,0 +1,7 @@
+name = "veil_inventory"
+version = "0.0.1"
+description = "Veil — inventory demo (scroll, context menu, hover/focus/selection, keyboard nav)"
+
+[orbs]
+veil_document = "path:../veil_document"
+veil_role = "path:../veil_role"

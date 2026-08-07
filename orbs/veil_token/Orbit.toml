@@ -1,0 +1,6 @@
+name = "veil_token"
+version = "0.0.1"
+description = "Veil - primitive design tokens (no margins; gap/pad only)"
+
+[orbs]
+bytes = "*"

@@ -1,0 +1,13 @@
+# veil_measure — layout computation.
+
+use ori_geometry
+use text
+
+# A measured node — final pixel rect after layout pass.
+public type Measured: node_id: int, rect: Rect
+
+# Monospace estimate until a real text engine lands: 8px advance,
+# 16px line height. Resolver, pick and painters must all agree on
+# these numbers — they ARE the text engine for now.
+public define text_size(content: text) -> Size:
+    Size{wide: byte_count(content) * 8, high: 16}

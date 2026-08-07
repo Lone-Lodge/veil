@@ -1,0 +1,48 @@
+# design-tokens — the atlas-wide palette + spacing scale.
+#
+# `tokens NS: key: value` blocks register as slot resources at boot
+# (project_load_tokens). Widgets consume via `color: X` / `style: X` —
+# the resolver chases refs, so `bg: surface` → `color:surface` → hex.
+#
+# Palette leans warm-ember (matches Lone Lodge / fireplace-signal DNA)
+# with muted greens for text-adventure feel. One accent color owned:
+# ember `#E8956A`. Semantic states (live/warn/danger) sparingly used.
+
+tokens color:
+    bg: "#141319"
+    surface: "#1C1B22"
+    elevated: "#25242D"
+    border: "#2E2D37"
+    border_strong: "#3A3945"
+    text: "#EDEBE4"
+    text_muted: "#8A867B"
+    text_dim: "#5A574F"
+    accent: "#E8956A"
+    live: "#7AB373"
+    warn: "#C9A86A"
+    danger: "#C47070"
+    axis_x: "#C47070"
+    axis_y: "#7AB373"
+    axis_z: "#5A8AC9"
+
+tokens space:
+    xs: 4
+    sm: 8
+    md: 12
+    lg: 16
+    xl: 24
+    xxl: 32
+
+tokens radius:
+    badge: 4
+    input: 6
+    panel: 8
+    card: 10
+    pill: 999
+
+tokens font_size:
+    caption: 11
+    body: 13
+    label: 14
+    heading: 18
+    title: 22

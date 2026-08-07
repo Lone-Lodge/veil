@@ -1,0 +1,76 @@
+# veil_token - primitive design values.
+#
+# "No margins; gap/pad only" - the Rust crate's invariant. Tokens
+# are named scalars the theme assembles into role styles.
+
+public type Spacing: name: text, pixels: int
+public type Colour: name: text, r: 0...255, g: 0...255, b: 0...255, a: 0...255
+public type Radius: name: text, pixels: int
+
+public define spacing(name: text, pixels: int) -> Spacing:
+    Spacing{name: name, pixels: pixels}
+
+# --- token reference resolution (the shared design-token chase) ------------
+# A design token is a name → value pair; a value is either a literal ("#RRGGBB")
+# or another token name (chased recursively). This mirrors Atlas's
+# `resolve_token_text` so Veil and Atlas resolve the SAME design-tokens.astra
+# palette through ONE algorithm - the first step of folding theme/tokens into
+# Veil (ARCHITECTURE.md step 5).
+
+use bytes
+
+public type TokenRef: name: text, literal: text
+
+define tk_starts_hash(v: text) -> truth:
+    b = bytes_from_text(v)
+    if bytes_length(b) == 0 then false else byte_at(b, 0) == 35
+
+define tk_name_eq(a: text, b: text) -> truth:
+    ba = bytes_from_text(a)
+    bb = bytes_from_text(b)
+    na = bytes_length(ba)
+    if na != bytes_length(bb):
+        false
+    else:
+        edit eq = true
+        loop i in 0..<na:
+            if byte_at(ba, i) != byte_at(bb, i):
+                eq = false
+        eq
+
+define tk_lookup(tokens: [TokenRef], name: text) -> text:
+    edit out = ""
+    loop i in 0..<len(tokens):
+        t = at(tokens, i)
+        if tk_name_eq(t.name, name):
+            out = t.literal
+    out
+
+# Resolve a colour value: a literal ("#…") passes through; a token name is
+# chased (its value may name another token) until a literal or a miss (the raw
+# value returned). A cycle guard caps the chase.
+public define resolve_token(tokens: [TokenRef], value: text) -> text:
+    if tk_starts_hash(value):
+        value
+    else:
+        edit cur = value
+        edit steps = 0
+        edit done = false
+        loop:
+            if done or steps >= 16:
+                break
+            hit = tk_lookup(tokens, cur)
+            if len(hit) == 0:
+                done = true
+            else:
+                cur = hit
+                if tk_starts_hash(cur):
+                    done = true
+                steps = steps + 1
+        cur
+
+# The colour palette, mirroring `veil/packages/design-tokens.astra` (tokens
+# color:). The single source of truth stays that .astra file; this literal
+# table is the interim until Veil loads it directly (a later increment).
+public define default_tokens() -> [TokenRef]:
+    [TokenRef{name: "bg", literal: "#141319"}, TokenRef{name: "surface", literal: "#1C1B22"}, TokenRef{name: "elevated", literal: "#25242D"}, TokenRef{name: "border", literal: "#2E2D37"}, TokenRef{name: "text", literal: "#EDEBE4"}, TokenRef{name: "text_muted", literal: "#8A867B"}, TokenRef{name: "accent", literal: "#E8956A"}, TokenRef{name: "live", literal: "#7AB373"}, TokenRef{name: "warn", literal: "#C9A86A"}, TokenRef{name: "danger", literal: "#C47070"}]

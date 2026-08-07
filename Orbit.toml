@@ -1,0 +1,22 @@
+[package]
+name = "veil"
+version = "0.0.1"
+description = "Veil - Semantic Document UI: intent + signals + resolver + display list. Pure Orion, standalone - atlas consumes only the ori_display seam."
+
+[orbs]
+veil_token = "path:orbs/veil_token"
+veil_role = "path:orbs/veil_role"
+veil_signal = "path:orbs/veil_signal"
+veil_document = "path:orbs/veil_document"
+veil_theme = "path:orbs/veil_theme"
+veil_interaction = "path:orbs/veil_interaction"
+veil_measure = "path:orbs/veil_measure"
+veil_resolver = "path:orbs/veil_resolver"
+veil_web = "path:orbs/veil_web"
+veil_theme_web = "path:orbs/veil_theme_web"
+veil_inventory = "path:orbs/veil_inventory"
+veil_showcase = "path:orbs/veil_showcase"
+ori_geometry = "path:../orion/orbs/ori_geometry"
+ori_display = "path:../orion/orbs/ori_display"
+text = "path:../orion/orbs/text"
+os = "*"

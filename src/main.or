@@ -1,0 +1,214 @@
+# Veil — the check suite.
+#
+# This file used to PRINT its results: 24 lines of the shape
+#
+#     print_line("stack scene draw commands (expect 5): " + show_int(...))
+#
+# with the expected value written in the message and nobody comparing it. A
+# human had to read the output and notice. That means 1000+ lines of layout,
+# hit-testing, signals and token resolution could break silently on any compiler
+# or resolver change, and the tree's one green-check command could only see that
+# the program STARTED.
+#
+# Every one of those expectations is now an assertion with the same documented
+# value, the summary says how many held, and a failure exits non-zero so
+# `atlas/tools/gates.sh` can see it.
+use ori_geometry
+use veil_token
+use veil_role
+use veil_signal
+use veil_document
+use veil_theme
+use ori_display
+use veil_interaction
+use veil_measure
+use veil_resolver
+use veil_web
+use veil_theme_web
+use veil_inventory
+use veil_showcase
+use os
+
+# ---- the harness ----
+# Counters live in slots: the process-global store, which is also how the
+# compiler keeps its own counters.
+
+define chk_bump(key: text):
+    prev = if slot_has(key) then slot_get_int(key) else 0
+    slot_set(key, prev + 1)
+
+define chk_pass() -> int:
+    if slot_has("veil:pass") then slot_get_int("veil:pass") else 0
+
+define chk_fail() -> int:
+    if slot_has("veil:fail") then slot_get_int("veil:fail") else 0
+
+define check(label: text, want: int, got: int):
+    if want == got:
+        chk_bump("veil:pass")
+        print_line("  ok   {label}")
+    else:
+        chk_bump("veil:fail")
+        print_line("  FAIL {label}: expected {want}, got {got}")
+
+define check_true(label: text, got: truth):
+    if got:
+        chk_bump("veil:pass")
+        print_line("  ok   {label}")
+    else:
+        chk_bump("veil:fail")
+        print_line("  FAIL {label}: expected true")
+
+define check_text(label: text, want: text, got: text):
+    if want == got:
+        chk_bump("veil:pass")
+        print_line("  ok   {label}")
+    else:
+        chk_bump("veil:fail")
+        print_line("  FAIL {label}: expected `{want}`, got `{got}`")
+
+define section(name: text):
+    print_line("")
+    print_line("{name}")
+
+define main() -> int:
+    print_line("Veil — pure Orion · check suite")
+    print_line("version: 0.0.1")
+
+    section("geometry")
+    rect = Rect{x: 0, y: 0, wide: 100, high: 50}
+    check_true("rect contains an inside point", rect_contains(rect, Point{x: 25, y: 25}))
+    check_true("rect rejects an outside point", not rect_contains(rect, Point{x: 200, y: 200}))
+
+    section("empty document")
+    doc = empty_doc()
+    theme = empty_theme()
+    check("an empty doc draws nothing", 0, cmd_count(resolve(doc, theme)))
+
+    section("web bindings")
+    web_theme = default_theme()
+    inv = demo_inventory()
+    moved = move_selection(inv, 2)
+    check("inventory selection moves", 2, moved.selected_index)
+    check("button scene has one root node", 1, scene_nodes(button_scene()))
+    # `display_list_json` wraps the commands in `{"commands":[…]}`, so an empty
+    # document renders the envelope with an empty array. (The old code printed
+    # this string and asserted nothing about it.)
+    check_text("an empty doc renders an empty command list", "\{\"commands\":[]\}", render(empty_doc(), web_theme))
+
+    # A button emits two commands (DrawRect + DrawText); (30,30) lands inside
+    # it, (700,500) misses entirely.
+    section("button: resolve + hit-test")
+    btn = button_scene()
+    dt = default_theme()
+    check("button draws rect + label", 2, cmd_count(resolve(btn, dt)))
+    check("pick at (30,30) hits the button", 0, pick_node(btn, dt, 30, 30))
+    check_true("pick at (700,500) misses", pick_node(btn, dt, 700, 500) < 0)
+
+    section("reactive signals")
+    a = signal_int(empty_store(), 10)
+    check("signal starts at its initial value", 10, signal_get(a.store, a.id))
+    check_true("allocating marks the store dirty", any_dirty(a.store))
+    cleared = clear_dirty(a.store)
+    check_true("clearing resets dirty", not any_dirty(cleared))
+    written = signal_set(cleared, a.id, 42)
+    check("a write lands", 42, signal_get(written, a.id))
+    check_true("a write marks dirty again", any_dirty(written))
+
+    section("interaction classification")
+    check_text("mouse_up is a release", "release", itag(classify("mouse_up", 5, 6)))
+    check_text("scroll is a scroll", "scroll", itag(classify("scroll", 7, 0)))
+    check_text("key_down is a key", "key", itag(classify("key_down", 65, 0)))
+    check_text("mouse_down is a press", "press", itag(classify("mouse_down", 5, 6)))
+    # Payloads land on the documented axis: a scroll delta and a key code both
+    # ride `x` (parallel scalar events); a pointer press keeps (x, y).
+    check("scroll delta rides x", 7, iscalar(classify("scroll", 7, 0)))
+    check("key code rides x", 65, iscalar(classify("key_down", 65, 0)))
+
+    # A panel with 3 heading children: 5 commands (panel rect + text, 3 heading
+    # texts). Two-pass layout stacks the headings tightly from y=32 — h1 [32,48],
+    # h2 [60,76], h3 [88,104] — so (35,40) is the first and (35,96) the third.
+    section("tree resolver")
+    st = stack_scene()
+    check("stack scene draws 5 commands", 5, cmd_count(resolve(st, dt)))
+    check("pick at (35,40) hits heading 1", 1, pick_node(st, dt, 35, 40))
+    check("pick at (35,96) hits heading 3", 3, pick_node(st, dt, 35, 96))
+
+    section("design tokens")
+    tks = default_tokens()
+    check_text("a token name chases to a literal", "#E8956A", resolve_token(tks, "accent"))
+    check_text("a `#` literal passes through", "#123456", resolve_token(tks, "#123456"))
+    check_text("a miss returns the raw value", "nope", resolve_token(tks, "nope"))
+
+    # A column panel with align:center over a wide + a narrow child: the narrow
+    # one centers within the wide one's cross extent, so its x sits right of the
+    # flush wide child.
+    section("flex: align, justify, grow")
+    apanel = Node{role: role("panel"), props: [NodeProp{key: "align", content: "center"}], children: [1, 2]}
+    awide = Node{role: role("text"), props: [NodeProp{key: "text", content: "wide label here"}], children: []}
+    anarrow = Node{role: role("text"), props: [NodeProp{key: "text", content: "hi"}], children: []}
+    am = layout(SemanticDocument{root: 0, nodes: [apanel, awide, anarrow]}, dt)
+    check_true("align center shifts the narrow child right", at(am, 2).rect.x > at(am, 1).rect.x)
+
+    # A column with an explicit h=200 taller than its content centers the child:
+    # kid y is pushed past 40 rather than sitting flush at 32.
+    jpanel = Node{role: role("panel"), props: [NodeProp{key: "h", content: "200"}, NodeProp{key: "justify", content: "center"}], children: [1]}
+    jkid = Node{role: role("text"), props: [NodeProp{key: "text", content: "x"}], children: []}
+    jm = layout(SemanticDocument{root: 0, nodes: [jpanel, jkid]}, dt)
+    check_true("justify center pushes the child down", at(jm, 1).rect.y > 40)
+
+    # A column child with grow fills the panel's explicit inner height:
+    # 200 - pad*2 = 168.
+    gpanel = Node{role: role("panel"), props: [NodeProp{key: "h", content: "200"}], children: [1]}
+    gkid = Node{role: role("text"), props: [NodeProp{key: "text", content: "x"}, NodeProp{key: "grow", content: "1"}], children: []}
+    gm = layout(SemanticDocument{root: 0, nodes: [gpanel, gkid]}, dt)
+    check("grow fills the inner height", 168, at(gm, 1).rect.high)
+
+    # A per-node `pad:` overrides the role's theme padding — the reconciliation
+    # that lets ONE resolver serve Atlas (per-entity props) and Veil-web
+    # (per-role theme). Role "text" has pad 0, so pad "20" makes the "x" box
+    # 8 + 20*2 = 48 wide.
+    section("per-node style override")
+    pnode = Node{role: role("text"), props: [NodeProp{key: "text", content: "x"}, NodeProp{key: "pad", content: "20"}], children: []}
+    psz = measure(SemanticDocument{root: 0, nodes: [pnode]}, dt, 0)
+    check("a pad prop overrides the role's padding", 48, psz.w)
+
+    passed = chk_pass()
+    failed = chk_fail()
+    total = passed + failed
+    print_line("")
+    if failed == 0:
+        print_line("  all {passed}/{total} passed")
+    else:
+        print_line("  {failed} of {total} FAILED")
+    # Non-zero on failure: this is what lets the gate see a regression instead of
+    # a wall of text that reads fine at a glance.
+    if failed == 0 then 0 else 1
+
+define cmd_count(list: DisplayList) -> int:
+    edit c = 0
+    loop _cmd in list.commands:
+        c = c + 1
+    c
+
+define itag(i: Interaction) -> text:
+    choose i:
+        PressAt(_, _) -> "press"
+        ReleaseAt(_, _) -> "release"
+        KeyPress(_) -> "key"
+        Scroll(_) -> "scroll"
+
+# The scalar payload of a non-pointer intent (key code / scroll delta), or the
+# x pixel of a pointer one — the axis `classify` documents for `x`.
+define iscalar(i: Interaction) -> int:
+    choose i:
+        PressAt(x, _) -> x
+        ReleaseAt(x, _) -> x
+        KeyPress(k) -> k
+        Scroll(d) -> d
+
+define scene_nodes(doc: SemanticDocument) -> int:
+    edit count = 0
+    loop _node in doc.nodes:
+        count = count + 1
+    count

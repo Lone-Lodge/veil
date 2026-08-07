@@ -1,0 +1,23 @@
+# veil_theme — design system as data.
+#
+# A theme is a flat list of (role, style) entries. The resolver
+# walks it deterministically — order matters, last-write wins.
+
+use veil_role
+use veil_token
+
+public type StyleRule: role_name: text, padding: int, gap: int, fg_colour: text, bg_colour: text, direction: text
+
+public type Theme: rules: [StyleRule]
+
+public define empty_theme() -> Theme:
+    Theme{rules: []}
+
+# direction: "" or "column" = children stack vertically (dagens beteende).
+# direction: "row" = children flow left-to-right on the same y.
+public define lookup_style(theme: Theme, role: Role) -> StyleRule:
+    edit found = StyleRule{role_name: role.name, padding: 0, gap: 0, fg_colour: "", bg_colour: "", direction: ""}
+    loop rule in theme.rules:
+        if rule.role_name == role.name:
+            found = rule
+    found

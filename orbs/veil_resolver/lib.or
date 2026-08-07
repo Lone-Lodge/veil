@@ -1,0 +1,256 @@
+# veil_resolver - document × theme → display list.
+#
+# Deterministic, explainable, inspectable: layout() exposes the
+# measured rect per node, and resolve/pick_node both consume that
+# single truth - the pixel you see and the pixel you hit-test come
+# from the same pass.
+
+use veil_document
+use veil_theme
+use ori_display
+use ori_geometry
+use veil_measure
+use bytes
+
+# The text a node presents, whichever prop carries it.
+public define node_text(node: Node) -> text:
+    edit found = ""
+    loop prop in node.props:
+        if prop.key == "label":
+            found = prop.content
+        if prop.key == "text":
+            found = prop.content
+        if prop.key == "body":
+            found = prop.content
+    found
+
+# A node's raw prop value for a key ("" if absent). Flex attributes
+# (align, later justify/grow/fill) ride as props until the model carries them
+# as fields - the interim carrier the fold uses (ARCHITECTURE.md step 5b).
+define prop_val(node: Node, key: text) -> text:
+    edit found = ""
+    loop prop in node.props:
+        if prop.key == key:
+            found = prop.content
+    found
+
+# Cross-axis alignment as a per-mille factor of the leftover extent:
+# start = flush (0), center = half (500), end = far edge (1000).
+define align_factor(a: text) -> int:
+    if a == "center" then 500 else if a == "end" then 1000 else 0
+
+# Parse a non-negative int from a prop string (digit bytes only).
+define parse_int_v(t: text) -> int:
+    b = bytes_from_text(t)
+    n = bytes_length(b)
+    edit acc = 0
+    loop i in 0..<n:
+        c = byte_at(b, i)
+        if c >= 48 and c <= 57:
+            acc = acc * 10 + (c - 48)
+    acc
+
+define prop_int(node: Node, key: text, dflt: int) -> int:
+    v = prop_val(node, key)
+    if len(v) == 0 then dflt else parse_int_v(v)
+
+define is_row(style: StyleRule) -> truth:
+    style.direction == "row"
+
+# --- per-node style: a node prop overrides the role's theme StyleRule --------
+# This is what unifies the two theme models: Veil-web drives style per-ROLE
+# (theme), Atlas drives it per-ENTITY (props on the widget). The resolver reads
+# props first, falling back to the theme - so ONE resolver serves both.
+define node_pad(node: Node, style: StyleRule) -> int:
+    prop_int(node, "pad", style.padding)
+
+define node_gap(node: Node, style: StyleRule) -> int:
+    prop_int(node, "gap", style.gap)
+
+define node_row(node: Node, style: StyleRule) -> truth:
+    l = prop_val(node, "layout")
+    if len(l) > 0 then l == "row" or l == "horizontal" else style.direction == "row"
+
+# Box fill colour: `color:` prop (Atlas, already token-resolved to a literal by
+# the adapter) else the theme's bg. Label colour: `ink:` prop else theme fg.
+define node_bg(node: Node, style: StyleRule) -> text:
+    c = prop_val(node, "color")
+    if len(c) > 0 then c else style.bg_colour
+
+define node_fg(node: Node, style: StyleRule) -> text:
+    c = prop_val(node, "ink")
+    if len(c) > 0 then c else style.fg_colour
+
+# A node's intrinsic content size (bottom-up). Explicit `w:`/`h:` props override.
+type Size2: w: int, h: int
+
+# --- pass 1: intrinsic sizing ---
+# A leaf sizes to its text + padding. A container sizes to the sum of its
+# children along the main axis (+ gaps) and the max along the cross axis, + its
+# own padding. Explicit `w`/`h` props win.
+public define measure(doc: SemanticDocument, theme: Theme, node_id: int) -> Size2:
+    node = at(doc.nodes, node_id)
+    style = lookup_style(theme, node.role)
+    pad = node_pad(node, style)
+    gap = node_gap(node, style)
+    ew = prop_int(node, "w", 0)
+    eh = prop_int(node, "h", 0)
+    ts = text_size(node_text(node))
+    if len(node.children) == 0:
+        Size2{w: if ew > 0 then ew else ts.wide + pad * 2, h: if eh > 0 then eh else ts.high + pad * 2}
+    else:
+        row = node_row(node, style)
+        edit main = 0
+        edit cross = 0
+        edit i = 0
+        loop c in node.children:
+            cs = measure(doc, theme, c)
+            cm = if row then cs.w else cs.h
+            cc = if row then cs.h else cs.w
+            if i > 0:
+                main = main + gap
+            main = main + cm
+            if cc > cross:
+                cross = cc
+            i = i + 1
+        cw = if row then main else cross
+        ch = if row then cross else main
+        Size2{w: if ew > 0 then ew else cw + pad * 2, h: if eh > 0 then eh else ch + pad * 2}
+
+# Children in `order:` order (default 0, stable on ties). Selection sort - child
+# counts are small.
+define child_order(doc: SemanticDocument, node: Node) -> [int]:
+    ids = node.children
+    n = len(ids)
+    edit out = []
+    edit taken = []
+    loop _p in 0..<n:
+        edit best_i = 0 - 1
+        edit best_o = 0
+        loop i in 0..<n:
+            edit already = false
+            loop t in taken:
+                if t == i:
+                    already = true
+            if not already:
+                o = prop_int(at(doc.nodes, at(ids, i)), "order", 0)
+                if best_i < 0 or o < best_o:
+                    best_i = i
+                    best_o = o
+        taken = append(taken, best_i)
+        out = append(out, at(ids, best_i))
+    out
+
+# --- pass 2: placement with flex ---
+# Place a node in its assigned box, then flow its children: `grow` expands
+# children to fill leftover main space; else `justify` distributes it; `align`
+# positions each child on the cross axis; `fill` stretches a child across it;
+# `order` reorders. The full flex vocabulary Atlas's layout_container has, on the
+# shared ori_display seam. (measure() is re-walked per child - fine for UI-sized
+# trees; memoize if it ever matters.)
+define place(doc: SemanticDocument, theme: Theme, node_id: int, x: int, y: int, w: int, h: int, measured: [Measured]) -> [Measured]:
+    node = at(doc.nodes, node_id)
+    style = lookup_style(theme, node.role)
+    edit out = set(measured, node_id, Measured{node_id: node_id, rect: Rect{x: x, y: y, wide: w, high: h}})
+    if len(node.children) == 0:
+        out
+    else:
+        row = node_row(node, style)
+        pad = node_pad(node, style)
+        gap = node_gap(node, style)
+        ix = x + pad
+        iy = y + pad
+        iw = w - pad * 2
+        ih = h - pad * 2
+        main_inner = if row then iw else ih
+        cross_inner = if row then ih else iw
+        main_start = if row then ix else iy
+        cross_start = if row then iy else ix
+        kids = child_order(doc, node)
+        nk = len(kids)
+        edit content_main = 0
+        edit total_grow = 0
+        edit i = 0
+        loop k in kids:
+            cs = measure(doc, theme, k)
+            cm = if row then cs.w else cs.h
+            if i > 0:
+                content_main = content_main + gap
+            content_main = content_main + cm
+            total_grow = total_grow + prop_int(at(doc.nodes, k), "grow", 0)
+            i = i + 1
+        leftover = main_inner - content_main
+        edit cursor = main_start
+        edit extra_gap = 0
+        if total_grow == 0 and leftover > 0:
+            just = prop_val(node, "justify")
+            if just == "between" and nk > 1:
+                extra_gap = leftover // (nk - 1)
+            else:
+                cursor = main_start + align_factor(just) * leftover // 1000
+        align = prop_val(node, "align")
+        edit acc = out
+        loop k in kids:
+            cs = measure(doc, theme, k)
+            edit cm = if row then cs.w else cs.h
+            cc = if row then cs.h else cs.w
+            if total_grow > 0 and leftover > 0:
+                cm = cm + prop_int(at(doc.nodes, k), "grow", 0) * leftover // total_grow
+            fillv = prop_val(at(doc.nodes, k), "fill")
+            edit ccross = cc
+            edit cross_off = 0
+            if fillv == "1" or fillv == "true":
+                ccross = cross_inner
+            else:
+                cross_off = align_factor(align) * (cross_inner - cc) // 1000
+            if row:
+                acc = place(doc, theme, k, cursor, cross_start + cross_off, cm, ccross, acc)
+            else:
+                acc = place(doc, theme, k, cross_start + cross_off, cursor, ccross, cm, acc)
+            cursor = cursor + cm + gap + extra_gap
+        acc
+
+# Two-pass layout: measure intrinsic sizes, then place from the root at (16,16),
+# the root sized to its content (or its explicit w/h). resolve and pick_node
+# consume the placed rects - one truth for paint and hit-test.
+public define layout(doc: SemanticDocument, theme: Theme) -> [Measured]:
+    n = len(doc.nodes)
+    edit out = []
+    loop i in 0..<n:
+        out = append(out, Measured{node_id: i, rect: Rect{x: 0, y: 0, wide: 0, high: 0}})
+    if n == 0:
+        out
+    else:
+        rs = measure(doc, theme, doc.root)
+        place(doc, theme, doc.root, 16, 16, rs.w, rs.h, out)
+
+public define resolve(doc: SemanticDocument, theme: Theme) -> DisplayList:
+    edit list = empty_list()
+    measured = layout(doc, theme)
+    n = len(doc.nodes)
+    loop i in 0..<n:
+        node = at(doc.nodes, i)
+        style = lookup_style(theme, node.role)
+        m = at(measured, i)
+        r = m.rect
+        # Skip nodes not reached by the DFS (zero rect) - they aren't in the
+        # tree, so they draw nothing. Provenance = node index: pick_node and
+        # the display list agree on identity for free.
+        if r.high > 0:
+            bg = node_bg(node, style)
+            if bg != "":
+                list = push_cmd(list, DrawRect(r, bg, i))
+            pad = node_pad(node, style)
+            pos = Point{x: r.x + pad, y: r.y + pad}
+            list = push_cmd(list, DrawText(pos, node_text(node), node_fg(node, style), 13, i))
+    list
+
+# Hit-test against the same layout the renderer drew. -1 = miss.
+# Last match wins so later (overlapping) nodes sit "on top".
+public define pick_node(doc: SemanticDocument, theme: Theme, x: int, y: int) -> int:
+    measured = layout(doc, theme)
+    edit hit = 0 - 1
+    loop m in measured:
+        if rect_contains(m.rect, Point{x: x, y: y}):
+            hit = m.node_id
+    hit

@@ -1,0 +1,41 @@
+# widgets — auto-rendered, auto-clicked UI primitives.
+#
+# Types are known to atlas by name. Any entity of these types is
+# rendered by the engine (no `on Render`) and, for interactive types,
+# click-dispatched (no `on Click` + hit-test).
+#
+# Layout: Panel containers (`layout: horizontal|vertical`). Children
+# reference them via `parent: "panel_name"` — auto-positioned.
+# Visibility: `show: text` names a resource/view; non-zero = visible.
+
+# `order:` sets a child's main-axis position within its container (lower
+# = earlier). Needed because auto-assigned entity ids batch per type, so
+# a Panel written before a Text still sorts after it without an explicit
+# order. Default 0 → falls back to id order (stable within a type).
+# `do:` names the action a click dispatches — `do: close` + `command
+# close:` derive the same code from the name, so there is no magic number.
+# Visibility: `show:` gates on a resource; when it fails the widget is
+# hidden + COLLAPSED (no layout space) by default. `hide: "hidden"` keeps
+# the space reserved. `ghost: 1` = rendered but NOT clickable (default 0).
+# Paint order = tree order (declaration/`order` index): a parent paints
+# before its children, later siblings on top, so an overlay declared LAST
+# (a command palette) sits above the base UI. No z-index attribute — the
+# tree IS the order.
+type Text x: int, y: int, text: text, color: text, size: int, parent: text, show: text, hide: text, ghost: int, editable: int, multi: int, kind: text, bind: text, placeholder: text, changed: text, order: int
+
+# Panel — the workhorse primitive. Replaces PressButton / Icon / Row /
+# Column / Sprite via attributes. A Panel becomes:
+#   - text label:      `text: "..."`, optional `color:`, `size:`
+#   - image/icon:      `image: asset_name`
+#   - clickable rect:  `role: button, do: name` (routes to ui_action)
+#   - release action:  `release: name` — fires when the pointer is let go
+#                       over the box (the press-release peer of `do:`)
+#   - container:       `layout: horizontal|vertical`, `gap:`, plus a
+#                       `name:` that children reference via `parent:`
+# Visibility gates via `show: resource_name`.
+# `style:` names a design-system token role (`card`, `pill`, …) —
+# resolved by #46. `items:` + `render:` iterate a list (deferred to
+# #49) — `render` names the template that renders each item. Note
+# `render` (not `template`) because `template` is a reserved keyword.
+# Text-typography attrs live on Text; Panel is chrome, not type.
+type Panel x: int, y: int, w: int, h: int, layout: text, style: text, text: text, image: text, hint: text, color: text, ink: text, w_from: text, size: int, gap: int, pad: int, align: text, justify: text, grow: int, fill: text, role: text, do: text, release: text, key: int, name: text, anchor: text, world: int, parent: text, show: text, hide: text, ghost: int, search: text, items: text, render: text, order: int, radius: int
