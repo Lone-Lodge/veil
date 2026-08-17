@@ -28,6 +28,7 @@ use veil_theme_web
 use veil_inventory
 use veil_showcase
 use os
+use typeface
 
 # ---- the harness ----
 # Counters live in slots: the process-global store, which is also how the
@@ -75,6 +76,7 @@ define main() -> int:
     print_line("Veil — pure Orion · check suite")
     print_line("version: 0.0.1")
 
+    face = font_body()
     section("geometry")
     rect = Rect{x: 0, y: 0, wide: 100, high: 50}
     check_true("rect contains an inside point", rect_contains(rect, Point{x: 25, y: 25}))
@@ -83,7 +85,7 @@ define main() -> int:
     section("empty document")
     doc = empty_doc()
     theme = empty_theme()
-    check("an empty doc draws nothing", 0, cmd_count(resolve(doc, theme)))
+    check("an empty doc draws nothing", 0, cmd_count(resolve(doc, theme, face)))
 
     section("web bindings")
     web_theme = default_theme()
@@ -101,9 +103,9 @@ define main() -> int:
     section("button: resolve + hit-test")
     btn = button_scene()
     dt = default_theme()
-    check("button draws rect + label", 2, cmd_count(resolve(btn, dt)))
-    check("pick at (30,30) hits the button", 0, pick_node(btn, dt, 30, 30))
-    check_true("pick at (700,500) misses", pick_node(btn, dt, 700, 500) < 0)
+    check("button draws rect + label", 2, cmd_count(resolve(btn, dt, face)))
+    check("pick at (30,30) hits the button", 0, pick_node(btn, dt, face, 30, 30))
+    check_true("pick at (700,500) misses", pick_node(btn, dt, face, 700, 500) < 0)
 
     section("reactive signals")
     a = signal_int(empty_store(), 10)
@@ -125,14 +127,46 @@ define main() -> int:
     check("scroll delta rides x", 7, iscalar(classify("scroll", 7, 0)))
     check("key code rides x", 65, iscalar(classify("key_down", 65, 0)))
 
-    # A panel with 3 heading children: 5 commands (panel rect + text, 3 heading
-    # texts). Two-pass layout stacks the headings tightly from y=32 — h1 [32,48],
-    # h2 [60,76], h3 [88,104] — so (35,40) is the first and (35,96) the third.
+    # A panel with 3 heading children: 4 commands (panel rect, 3 heading
+    # texts - an empty text prop draws NOTHING now, it used to emit an
+    # empty DrawText). Two-pass layout stacks the headings tightly from
+    # y=32 — h1 [32,48], h2 [60,76], h3 [88,104] — so (35,40) is the
+    # first and (35,96) the third.
     section("tree resolver")
     st = stack_scene()
-    check("stack scene draws 5 commands", 5, cmd_count(resolve(st, dt)))
-    check("pick at (35,40) hits heading 1", 1, pick_node(st, dt, 35, 40))
-    check("pick at (35,96) hits heading 3", 3, pick_node(st, dt, 35, 96))
+    check("stack scene draws 4 commands", 4, cmd_count(resolve(st, dt, face)))
+    # The host-box entry points: the same tree laid into a given root
+    # box lands where the box says, and picks agree.
+    boxed = layout_in(st, dt, face, Rect{x: 100, y: 200, wide: 400, high: 400})
+    check_true("layout_in places the root at the box", at(boxed, 0).rect.x == 100 and at(boxed, 0).rect.y == 200)
+    check_true("pick_node_in hits inside the box", pick_node_in(st, dt, face, Rect{x: 100, y: 200, wide: 400, high: 400}, 120, 240) >= 0)
+
+    # pick_spoken: a do: node speaks its name, a painted mute node
+    # blocks, and unpainted scaffolding is air.
+    sp_root = Node{role: role("panel"), props: [], children: [1, 2]}
+    sp_btn = Node{role: role("panel"), props: [NodeProp{key: "color", content: "#222222"}, NodeProp{key: "text", content: "GO"}, NodeProp{key: "do", content: "go"}, NodeProp{key: "w", content: "100"}, NodeProp{key: "h", content: "40"}], children: []}
+    sp_card = Node{role: role("panel"), props: [NodeProp{key: "color", content: "#333333"}, NodeProp{key: "w", content: "100"}, NodeProp{key: "h", content: "40"}], children: []}
+    sp_doc = SemanticDocument{root: 0, nodes: [sp_root, sp_btn, sp_card]}
+    sp_theme = empty_theme()
+    sp_box = Rect{x: 0, y: 0, wide: 400, high: 400}
+    check_text("a do: node speaks its name", "go", pick_spoken(sp_doc, sp_theme, face, sp_box, 10, 10))
+    check_text("a painted mute node blocks", "\{mute\}", pick_spoken(sp_doc, sp_theme, face, sp_box, 10, 60))
+    check_text("scaffolding is air", "", pick_spoken(sp_doc, sp_theme, face, sp_box, 300, 300))
+
+    # `show: 0` collapses: the hidden child takes no space, paints
+    # nothing and claims no click - the row closes over it.
+    hid_row = Node{role: role("panel"), props: [NodeProp{key: "layout", content: "row"}], children: [1, 2]}
+    hid_gone = Node{role: role("panel"), props: [NodeProp{key: "color", content: "#111111"}, NodeProp{key: "w", content: "100"}, NodeProp{key: "h", content: "40"}, NodeProp{key: "show", content: "0"}], children: []}
+    hid_here = Node{role: role("panel"), props: [NodeProp{key: "color", content: "#222222"}, NodeProp{key: "w", content: "100"}, NodeProp{key: "h", content: "40"}], children: []}
+    hid_doc = SemanticDocument{root: 0, nodes: [hid_row, hid_gone, hid_here]}
+    hm = layout(hid_doc, sp_theme, face)
+    check("a hidden node has no rect", 0, at(hm, 1).rect.wide)
+    # The row starts at the root's own origin (16): the visible child
+    # sits where the hidden one would have, not 100px past it.
+    check("the row closes over it", 16, at(hm, 2).rect.x)
+    check("a hidden node paints nothing", 1, cmd_count(resolve(hid_doc, sp_theme, face)))
+    check("pick at (35,40) hits heading 1", 1, pick_node(st, dt, face, 35, 40))
+    check("pick at (35,96) hits heading 3", 3, pick_node(st, dt, face, 35, 96))
 
     section("design tokens")
     tks = default_tokens()
@@ -147,31 +181,97 @@ define main() -> int:
     apanel = Node{role: role("panel"), props: [NodeProp{key: "align", content: "center"}], children: [1, 2]}
     awide = Node{role: role("text"), props: [NodeProp{key: "text", content: "wide label here"}], children: []}
     anarrow = Node{role: role("text"), props: [NodeProp{key: "text", content: "hi"}], children: []}
-    am = layout(SemanticDocument{root: 0, nodes: [apanel, awide, anarrow]}, dt)
+    am = layout(SemanticDocument{root: 0, nodes: [apanel, awide, anarrow]}, dt, face)
     check_true("align center shifts the narrow child right", at(am, 2).rect.x > at(am, 1).rect.x)
 
     # A column with an explicit h=200 taller than its content centers the child:
     # kid y is pushed past 40 rather than sitting flush at 32.
     jpanel = Node{role: role("panel"), props: [NodeProp{key: "h", content: "200"}, NodeProp{key: "justify", content: "center"}], children: [1]}
     jkid = Node{role: role("text"), props: [NodeProp{key: "text", content: "x"}], children: []}
-    jm = layout(SemanticDocument{root: 0, nodes: [jpanel, jkid]}, dt)
+    jm = layout(SemanticDocument{root: 0, nodes: [jpanel, jkid]}, dt, face)
     check_true("justify center pushes the child down", at(jm, 1).rect.y > 40)
 
     # A column child with grow fills the panel's explicit inner height:
     # 200 - pad*2 = 168.
     gpanel = Node{role: role("panel"), props: [NodeProp{key: "h", content: "200"}], children: [1]}
     gkid = Node{role: role("text"), props: [NodeProp{key: "text", content: "x"}, NodeProp{key: "grow", content: "1"}], children: []}
-    gm = layout(SemanticDocument{root: 0, nodes: [gpanel, gkid]}, dt)
+    gm = layout(SemanticDocument{root: 0, nodes: [gpanel, gkid]}, dt, face)
     check("grow fills the inner height", 168, at(gm, 1).rect.high)
 
     # A per-node `pad:` overrides the role's theme padding — the reconciliation
     # that lets ONE resolver serve Atlas (per-entity props) and Veil-web
     # (per-role theme). Role "text" has pad 0, so pad "20" makes the "x" box
-    # 8 + 20*2 = 48 wide.
+    # 7 + 20*2 = 47 wide (7 = Inter's x advance at the 13px body default —
+    # measurement reads the REAL face now, not the old 8px monospace guess).
     section("per-node style override")
     pnode = Node{role: role("text"), props: [NodeProp{key: "text", content: "x"}, NodeProp{key: "pad", content: "20"}], children: []}
-    psz = measure(SemanticDocument{root: 0, nodes: [pnode]}, dt, 0)
-    check("a pad prop overrides the role's padding", 48, psz.w)
+    psz = measure(SemanticDocument{root: 0, nodes: [pnode]}, dt, face, 0)
+    check("a pad prop overrides the role's padding", 47, psz.w)
+
+    section("role states")
+    # A theme spells out only what a state CHANGES; everything else falls
+    # back to the resting rule. Without this the document has to pick its
+    # look by role name (item, item_lit, item_on) - which is the one thing
+    # the document is not supposed to know.
+    st_rest = StyleRule{role_name: "item", padding: 4, gap: 0, fg_colour: "#aaaaaa", bg_colour: "", direction: "row", radius: 0, size: 0, border: 0, border_colour: ""}
+    st_lit = StyleRule{role_name: "item:lit", padding: 4, gap: 0, fg_colour: "#ffffff", bg_colour: "#242424", direction: "row", radius: 0, size: 0, border: 0, border_colour: ""}
+    st_theme = Theme{rules: [st_rest, st_lit]}
+    check_text("no state uses the resting rule", "#aaaaaa", lookup_state(st_theme, role("item"), "").fg_colour)
+    check_text("a state picks its own rule", "#ffffff", lookup_state(st_theme, role("item"), "lit").fg_colour)
+    check_text("an unknown state falls back", "#aaaaaa", lookup_state(st_theme, role("item"), "nope").fg_colour)
+    rest_node = Node{role: role("item"), props: [NodeProp{key: "text", content: "x"}], children: []}
+    lit_node = Node{role: role("item"), props: [NodeProp{key: "text", content: "x"}, NodeProp{key: "state", content: "lit"}], children: []}
+    check("a resting row paints only its label", 1, cmd_count(resolve(SemanticDocument{root: 0, nodes: [rest_node]}, st_theme, face)))
+    check("a lit row paints its plate too", 2, cmd_count(resolve(SemanticDocument{root: 0, nodes: [lit_node]}, st_theme, face)))
+
+    section("the theme carries radius and size")
+    # Before this a document had to say `radius: 7` and `size: 12` itself,
+    # which is a document saying how a thing LOOKS. A node prop still wins
+    # where one thing genuinely differs from its kind.
+    big = StyleRule{role_name: "heading", padding: 0, gap: 0, fg_colour: "#fff", bg_colour: "", direction: "", radius: 0, size: 26, border: 0, border_colour: ""}
+    bt = Theme{rules: [big]}
+    h_theme = Node{role: role("heading"), props: [NodeProp{key: "text", content: "Hi"}], children: []}
+    h_own = Node{role: role("heading"), props: [NodeProp{key: "text", content: "Hi"}, NodeProp{key: "size", content: "13"}], children: []}
+    w_theme = measure(SemanticDocument{root: 0, nodes: [h_theme]}, bt, face, 0).w
+    w_own = measure(SemanticDocument{root: 0, nodes: [h_own]}, bt, face, 0).w
+    check("the role sets the type size", 26, w_theme)
+    check("a node prop still overrides it", 13, w_own)
+
+    section("a document that lists its root last")
+    # Building a flat indexed tree bottom-up puts the root at the END of the
+    # array. Paint and pick used to walk the array, so the root - which
+    # covers the whole window - painted over everything and answered every
+    # click. The whole UI went dead. Both walk the tree now.
+    kid = Node{role: role("button"), props: [NodeProp{key: "label", content: "Go"}, NodeProp{key: "do", content: "go"}], children: []}
+    root = Node{role: role("panel"), props: [NodeProp{key: "w", content: "300"}, NodeProp{key: "h", content: "200"}], children: [0]}
+    last = SemanticDocument{root: 1, nodes: [kid, root]}
+    lt = Theme{rules: [StyleRule{role_name: "panel", padding: 10, gap: 0, fg_colour: "", bg_colour: "#111111", direction: "column", radius: 0, size: 0, border: 0, border_colour: ""}, StyleRule{role_name: "button", padding: 6, gap: 0, fg_colour: "#ffffff", bg_colour: "#0ea5e9", direction: "row", radius: 0, size: 13, border: 0, border_colour: ""}]}
+    lbox = Rect{x: 0, y: 0, wide: 300, high: 200}
+    check_text("the child answers, not the root that follows it", "go", pick_spoken(last, lt, face, lbox, 20, 20))
+    check_text("a point outside the child is the root's", "\{mute\}", pick_spoken(last, lt, face, lbox, 20, 150))
+
+    section("a control keeps its own click")
+    # A button is its plate, its label and its icon, and every one of those
+    # is painted and sits ON TOP of the node carrying the do:. Letting a
+    # painted child answer meant clicking the middle of a button - the part
+    # you actually aim at - hit nothing.
+    inner = Node{role: role("panel"), props: [NodeProp{key: "w", content: "80"}, NodeProp{key: "h", content: "20"}], children: []}
+    btn2 = Node{role: role("button"), props: [NodeProp{key: "do", content: "go"}, NodeProp{key: "w", content: "100"}, NodeProp{key: "h", content: "40"}], children: [0]}
+    bd = SemanticDocument{root: 1, nodes: [inner, btn2]}
+    bt2 = Theme{rules: [StyleRule{role_name: "button", padding: 0, gap: 0, fg_colour: "", bg_colour: "#0ea5e9", direction: "column", radius: 0, size: 0, border: 0, border_colour: ""}, StyleRule{role_name: "panel", padding: 0, gap: 0, fg_colour: "", bg_colour: "#111111", direction: "column", radius: 0, size: 0, border: 0, border_colour: ""}]}
+    bbox = Rect{x: 0, y: 0, wide: 200, high: 100}
+    check_text("clicking the middle of a button hits the button", "go", pick_spoken(bd, bt2, face, bbox, 40, 10))
+
+    section("borders")
+    # A bordered box is drawn twice - the edge full size, the fill inset -
+    # so a rim needs no nested node in the document. It used to.
+    plain = StyleRule{role_name: "card", padding: 0, gap: 0, fg_colour: "", bg_colour: "#222222", direction: "column", radius: 6, size: 0, border: 0, border_colour: ""}
+    rimmed = StyleRule{role_name: "input", padding: 0, gap: 0, fg_colour: "", bg_colour: "#222222", direction: "column", radius: 6, size: 0, border: 1, border_colour: "#e8813c"}
+    bth = Theme{rules: [plain, rimmed]}
+    bnode = Node{role: role("card"), props: [NodeProp{key: "w", content: "60"}, NodeProp{key: "h", content: "20"}], children: []}
+    rnode = Node{role: role("input"), props: [NodeProp{key: "w", content: "60"}, NodeProp{key: "h", content: "20"}], children: []}
+    check("a plain box is one command", 1, cmd_count(resolve(SemanticDocument{root: 0, nodes: [bnode]}, bth, face)))
+    check("a bordered box is two", 2, cmd_count(resolve(SemanticDocument{root: 0, nodes: [rnode]}, bth, face)))
 
     passed = chk_pass()
     failed = chk_fail()

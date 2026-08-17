@@ -10,6 +10,7 @@ use ori_display
 use veil_document
 use veil_resolver
 use veil_theme
+use typeface
 # Serialise a resolved DisplayList to the fixed JSON contract:
 #   {"commands":[{"kind":"rect","x":..,"y":..,"w":..,"h":..,"color":".."},
 #                {"kind":"text","x":..,"y":..,"text":"..","color":".."}]}
@@ -57,5 +58,5 @@ define icon_json(p: Point, icon: text, size: int, src: int) -> text:
 # whole web painter sits behind this one fn — no widget classes,
 # no DOM, just data.
 public define render(doc: SemanticDocument, theme: Theme) -> text:
-    list = resolve(doc, theme)
+    list = resolve(doc, theme, font_body())
     display_list_json(list)

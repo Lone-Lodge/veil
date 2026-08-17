@@ -22,14 +22,14 @@ use bytes
 public type TokenRef: name: text, literal: text
 
 define tk_starts_hash(v: text) -> truth:
-    b = bytes_from_text(v)
-    if bytes_length(b) == 0 then false else byte_at(b, 0) == 35
+    b = bytes_of(v)
+    if bytes_count(b) == 0 then false else byte_at(b, 0) == 35
 
 define tk_name_eq(a: text, b: text) -> truth:
-    ba = bytes_from_text(a)
-    bb = bytes_from_text(b)
-    na = bytes_length(ba)
-    if na != bytes_length(bb):
+    ba = bytes_of(a)
+    bb = bytes_of(b)
+    na = bytes_count(ba)
+    if na != bytes_count(bb):
         false
     else:
         edit eq = true
@@ -40,7 +40,7 @@ define tk_name_eq(a: text, b: text) -> truth:
 
 define tk_lookup(tokens: [TokenRef], name: text) -> text:
     edit out = ""
-    loop i in 0..<len(tokens):
+    loop i in 0..<length(tokens):
         t = at(tokens, i)
         if tk_name_eq(t.name, name):
             out = t.literal
@@ -60,7 +60,7 @@ public define resolve_token(tokens: [TokenRef], value: text) -> text:
             if done or steps >= 16:
                 break
             hit = tk_lookup(tokens, cur)
-            if len(hit) == 0:
+            if length(hit) == 0:
                 done = true
             else:
                 cur = hit

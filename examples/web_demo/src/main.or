@@ -109,7 +109,7 @@ define draw_slot(list0: DisplayList, index: int, selected: int) -> DisplayList:
     x = grid_x() + col * slot_pitch()
     y = grid_y() + row * slot_pitch()
     fields = item(index)
-    filled = len(fields) > 0
+    filled = length(fields) > 0
     edit frame_colour = "#2a2140"
     edit fill_colour = "#151022"
     if filled:
@@ -137,7 +137,7 @@ define draw_detail(list0: DisplayList, selected: int) -> DisplayList:
     list = push_cmd(list, rect_at(px - 1, py - 1, pw + 2, ph + 2, "#3a2a5e"))
     list = push_cmd(list, rect_at(px, py, pw, ph, "rgba(22,14,40,0.96)"))
     fields = item(selected)
-    if len(fields) == 0:
+    if length(fields) == 0:
         list = push_cmd(list, text_at(px + 20, py + 130, "Select an item", "#6f6590", 13))
         return list
     rarity = at(fields, 2)
@@ -210,7 +210,7 @@ define main() -> int:
             clients = append(clients, fresh)
             last_sent = ""
 
-        n = len(clients)
+        n = length(clients)
         loop i in 0..<n:
             msg = ws_recv_text(at(clients, i))
             if msg != "":
@@ -220,11 +220,11 @@ define main() -> int:
                 hit = slot_from_click(mx, my)
                 if hit >= 0:
                     fields = item(hit)
-                    if len(fields) > 0:
+                    if length(fields) > 0:
                         selected = hit
                         name = at(fields, 1)
                         note = "Inspecting: {name}"
-                    if len(fields) == 0:
+                    if length(fields) == 0:
                         note = "Empty slot"
                 if hit < 0:
                     if my < 60:
@@ -232,7 +232,7 @@ define main() -> int:
 
         current = frame(selected, note)
         if current != last_sent:
-            if len(clients) > 0:
+            if length(clients) > 0:
                 clients = ws_broadcast_text(clients, current)
                 last_sent = current
         sleep(0.03)

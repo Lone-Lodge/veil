@@ -1,13 +1,21 @@
 # veil_measure — layout computation.
 
 use ori_geometry
-use text
+use typeface
 
 # A measured node — final pixel rect after layout pass.
 public type Measured: node_id: int, rect: Rect
 
-# Monospace estimate until a real text engine lands: 8px advance,
-# 16px line height. Resolver, pick and painters must all agree on
-# these numbers — they ARE the text engine for now.
-public define text_size(content: text) -> Size:
-    Size{wide: byte_count(content) * 8, high: 16}
+# Real text metrics: the line measured by the shared engine face
+# (typeface — the same TTF advances every renderer draws with), width
+# from the font's own advance widths at `size_px`, height = the em box
+# (ascent + descent). Resolver, pick and painters all read THIS, so
+# the pixel measured and the pixel drawn come from one engine.
+public define text_size(content: text, size_px: int, face: Font) -> Size:
+    scale = to_real(size_px) / to_real(face.upm)
+    letters = bytes_of(content)
+    edit wide = 0.0
+    loop i in 0..<bytes_count(letters):
+        wide = wide + to_real(advance_width(face, glyph_id(face, byte_at(letters, i)))) * scale
+    high = if bytes_count(letters) == 0 then 0.0 else to_real(font_ascent(face) - font_descent(face)) * scale
+    Size{wide: to_whole(wide + 0.5), high: to_whole(high + 0.5)}

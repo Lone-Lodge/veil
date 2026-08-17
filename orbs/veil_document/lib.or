@@ -11,5 +11,21 @@ public type Node: role: Role, props: [NodeProp], children: [int]
 
 public type SemanticDocument: root: int, nodes: [Node]
 
+# The `do:` a node carries - its click's spoken name. "" when mute.
+public define node_do(node: Node) -> text:
+    edit act = ""
+    loop prop in node.props:
+        if prop.key == "do":
+            act = prop.content
+    act
+
+# Whether any node in the document speaks this `do:` name.
+public define doc_speaks(doc: SemanticDocument, name: text) -> truth:
+    edit found = false
+    loop node in doc.nodes:
+        if node_do(node) == name:
+            found = true
+    found
+
 public define empty_doc() -> SemanticDocument:
     SemanticDocument{root: 0, nodes: []}

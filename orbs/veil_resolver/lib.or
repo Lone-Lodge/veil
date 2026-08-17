@@ -10,6 +10,7 @@ use veil_theme
 use ori_display
 use ori_geometry
 use veil_measure
+use typeface
 use bytes
 
 # The text a node presents, whichever prop carries it.
@@ -34,6 +35,40 @@ define prop_val(node: Node, key: text) -> text:
             found = prop.content
     found
 
+# `show: 0` hides a node AND collapses it - no size, no place, no
+# paint, no click, no gap where it stood. Absent or non-zero shows.
+# The host writes the 0/1; the resolver only obeys it.
+public define node_shown(node: Node) -> truth:
+    prop_val(node, "show") != "0"
+
+# The type size a node asks for: its own `size:` prop, else the role's, else
+# the 13px body default. Measure and DrawText read the SAME number, so text
+# is never wider than its box thinks.
+define node_size(node: Node, style: StyleRule) -> int:
+    dflt = if style.size > 0 then style.size else 13
+    prop_int(node, "size", dflt)
+
+# Corner rounding, the same way round: the node's own, else the role's.
+define node_radius(node: Node, style: StyleRule) -> int:
+    prop_int(node, "radius", style.radius)
+
+# Border width and its colour, node prop first like everything else.
+define node_border(node: Node, style: StyleRule) -> int:
+    prop_int(node, "border", style.border)
+
+define node_border_colour(node: Node, style: StyleRule) -> text:
+    c = prop_val(node, "edge")
+    if length(c) > 0 then c else style.border_colour
+
+define inset(r: Rect, by: int) -> Rect:
+    d = to_real(by)
+    Rect{x: r.x + d, y: r.y + d, wide: r.wide - d * 2.0, high: r.high - d * 2.0}
+
+# One filled box, rounded or not.
+define push_box(list: DisplayList, r: Rect, colour: text, rad: int, src: int) -> DisplayList:
+    if rad > 0 then push_cmd(list, DrawRoundRect(r, colour, rad, src))
+    else push_cmd(list, DrawRect(r, colour, src))
+
 # Cross-axis alignment as a per-mille factor of the leftover extent:
 # start = flush (0), center = half (500), end = far edge (1000).
 define align_factor(a: text) -> int:
@@ -41,8 +76,8 @@ define align_factor(a: text) -> int:
 
 # Parse a non-negative int from a prop string (digit bytes only).
 define parse_int_v(t: text) -> int:
-    b = bytes_from_text(t)
-    n = bytes_length(b)
+    b = bytes_of(t)
+    n = bytes_count(b)
     edit acc = 0
     loop i in 0..<n:
         c = byte_at(b, i)
@@ -52,7 +87,13 @@ define parse_int_v(t: text) -> int:
 
 define prop_int(node: Node, key: text, dflt: int) -> int:
     v = prop_val(node, key)
-    if len(v) == 0 then dflt else parse_int_v(v)
+    if length(v) == 0 then dflt else parse_int_v(v)
+
+# The rule for a node: its role, in whatever state the node says it is in.
+# One place, so paint, measure, place and pick can never disagree about
+# what a node looks like.
+define style_of(theme: Theme, node: Node) -> StyleRule:
+    lookup_state(theme, node.role, prop_val(node, "state"))
 
 define is_row(style: StyleRule) -> truth:
     style.direction == "row"
@@ -69,17 +110,17 @@ define node_gap(node: Node, style: StyleRule) -> int:
 
 define node_row(node: Node, style: StyleRule) -> truth:
     l = prop_val(node, "layout")
-    if len(l) > 0 then l == "row" or l == "horizontal" else style.direction == "row"
+    if length(l) > 0 then l == "row" or l == "horizontal" else style.direction == "row"
 
 # Box fill colour: `color:` prop (Atlas, already token-resolved to a literal by
 # the adapter) else the theme's bg. Label colour: `ink:` prop else theme fg.
 define node_bg(node: Node, style: StyleRule) -> text:
     c = prop_val(node, "color")
-    if len(c) > 0 then c else style.bg_colour
+    if length(c) > 0 then c else style.bg_colour
 
 define node_fg(node: Node, style: StyleRule) -> text:
     c = prop_val(node, "ink")
-    if len(c) > 0 then c else style.fg_colour
+    if length(c) > 0 then c else style.fg_colour
 
 # A node's intrinsic content size (bottom-up). Explicit `w:`/`h:` props override.
 type Size2: w: int, h: int
@@ -88,15 +129,21 @@ type Size2: w: int, h: int
 # A leaf sizes to its text + padding. A container sizes to the sum of its
 # children along the main axis (+ gaps) and the max along the cross axis, + its
 # own padding. Explicit `w`/`h` props win.
-public define measure(doc: SemanticDocument, theme: Theme, node_id: int) -> Size2:
+public define measure(doc: SemanticDocument, theme: Theme, face: Font, node_id: int) -> Size2:
+    if node_shown(at(doc.nodes, node_id)):
+        measure_shown(doc, theme, face, node_id)
+    else:
+        Size2{w: 0, h: 0}
+
+define measure_shown(doc: SemanticDocument, theme: Theme, face: Font, node_id: int) -> Size2:
     node = at(doc.nodes, node_id)
-    style = lookup_style(theme, node.role)
+    style = style_of(theme, node)
     pad = node_pad(node, style)
     gap = node_gap(node, style)
     ew = prop_int(node, "w", 0)
     eh = prop_int(node, "h", 0)
-    ts = text_size(node_text(node))
-    if len(node.children) == 0:
+    ts = text_size(node_text(node), node_size(node, style), face)
+    if length(node.children) == 0:
         Size2{w: if ew > 0 then ew else ts.wide + pad * 2, h: if eh > 0 then eh else ts.high + pad * 2}
     else:
         row = node_row(node, style)
@@ -104,15 +151,16 @@ public define measure(doc: SemanticDocument, theme: Theme, node_id: int) -> Size
         edit cross = 0
         edit i = 0
         loop c in node.children:
-            cs = measure(doc, theme, c)
-            cm = if row then cs.w else cs.h
-            cc = if row then cs.h else cs.w
-            if i > 0:
-                main = main + gap
-            main = main + cm
-            if cc > cross:
-                cross = cc
-            i = i + 1
+            if node_shown(at(doc.nodes, c)):
+                cs = measure(doc, theme, face, c)
+                cm = if row then cs.w else cs.h
+                cc = if row then cs.h else cs.w
+                if i > 0:
+                    main = main + gap
+                main = main + cm
+                if cc > cross:
+                    cross = cc
+                i = i + 1
         cw = if row then main else cross
         ch = if row then cross else main
         Size2{w: if ew > 0 then ew else cw + pad * 2, h: if eh > 0 then eh else ch + pad * 2}
@@ -121,7 +169,7 @@ public define measure(doc: SemanticDocument, theme: Theme, node_id: int) -> Size
 # counts are small.
 define child_order(doc: SemanticDocument, node: Node) -> [int]:
     ids = node.children
-    n = len(ids)
+    n = length(ids)
     edit out = []
     edit taken = []
     loop _p in 0..<n:
@@ -148,11 +196,11 @@ define child_order(doc: SemanticDocument, node: Node) -> [int]:
 # `order` reorders. The full flex vocabulary Atlas's layout_container has, on the
 # shared ori_display seam. (measure() is re-walked per child - fine for UI-sized
 # trees; memoize if it ever matters.)
-define place(doc: SemanticDocument, theme: Theme, node_id: int, x: int, y: int, w: int, h: int, measured: [Measured]) -> [Measured]:
+define place_nodes(doc: SemanticDocument, theme: Theme, face: Font, node_id: int, x: int, y: int, w: int, h: int, measured: [Measured]) -> [Measured]:
     node = at(doc.nodes, node_id)
-    style = lookup_style(theme, node.role)
+    style = style_of(theme, node)
     edit out = set(measured, node_id, Measured{node_id: node_id, rect: Rect{x: x, y: y, wide: w, high: h}})
-    if len(node.children) == 0:
+    if length(node.children) == 0:
         out
     else:
         row = node_row(node, style)
@@ -167,90 +215,210 @@ define place(doc: SemanticDocument, theme: Theme, node_id: int, x: int, y: int, 
         main_start = if row then ix else iy
         cross_start = if row then iy else ix
         kids = child_order(doc, node)
-        nk = len(kids)
         edit content_main = 0
         edit total_grow = 0
         edit i = 0
+        edit shown_kids = 0
         loop k in kids:
-            cs = measure(doc, theme, k)
-            cm = if row then cs.w else cs.h
-            if i > 0:
-                content_main = content_main + gap
-            content_main = content_main + cm
-            total_grow = total_grow + prop_int(at(doc.nodes, k), "grow", 0)
-            i = i + 1
+            if node_shown(at(doc.nodes, k)):
+                cs = measure(doc, theme, face, k)
+                cm = if row then cs.w else cs.h
+                if i > 0:
+                    content_main = content_main + gap
+                content_main = content_main + cm
+                total_grow = total_grow + prop_int(at(doc.nodes, k), "grow", 0)
+                i = i + 1
+                shown_kids = shown_kids + 1
         leftover = main_inner - content_main
         edit cursor = main_start
         edit extra_gap = 0
         if total_grow == 0 and leftover > 0:
             just = prop_val(node, "justify")
-            if just == "between" and nk > 1:
-                extra_gap = leftover // (nk - 1)
+            if just == "between" and shown_kids > 1:
+                extra_gap = leftover // (shown_kids - 1)
             else:
                 cursor = main_start + align_factor(just) * leftover // 1000
         align = prop_val(node, "align")
         edit acc = out
         loop k in kids:
-            cs = measure(doc, theme, k)
-            edit cm = if row then cs.w else cs.h
-            cc = if row then cs.h else cs.w
-            if total_grow > 0 and leftover > 0:
-                cm = cm + prop_int(at(doc.nodes, k), "grow", 0) * leftover // total_grow
-            fillv = prop_val(at(doc.nodes, k), "fill")
-            edit ccross = cc
-            edit cross_off = 0
-            if fillv == "1" or fillv == "true":
-                ccross = cross_inner
-            else:
-                cross_off = align_factor(align) * (cross_inner - cc) // 1000
-            if row:
-                acc = place(doc, theme, k, cursor, cross_start + cross_off, cm, ccross, acc)
-            else:
-                acc = place(doc, theme, k, cross_start + cross_off, cursor, ccross, cm, acc)
-            cursor = cursor + cm + gap + extra_gap
+            if node_shown(at(doc.nodes, k)):
+                cs = measure(doc, theme, face, k)
+                edit cm = if row then cs.w else cs.h
+                cc = if row then cs.h else cs.w
+                if total_grow > 0 and leftover > 0:
+                    cm = cm + prop_int(at(doc.nodes, k), "grow", 0) * leftover // total_grow
+                fillv = prop_val(at(doc.nodes, k), "fill")
+                edit ccross = cc
+                edit cross_off = 0
+                if fillv == "1" or fillv == "true":
+                    ccross = cross_inner
+                else:
+                    cross_off = align_factor(align) * (cross_inner - cc) // 1000
+                if row:
+                    acc = place_nodes(doc, theme, face, k, cursor, cross_start + cross_off, cm, ccross, acc)
+                else:
+                    acc = place_nodes(doc, theme, face, k, cross_start + cross_off, cursor, ccross, cm, acc)
+                cursor = cursor + cm + gap + extra_gap
         acc
 
 # Two-pass layout: measure intrinsic sizes, then place from the root at (16,16),
 # the root sized to its content (or its explicit w/h). resolve and pick_node
 # consume the placed rects - one truth for paint and hit-test.
-public define layout(doc: SemanticDocument, theme: Theme) -> [Measured]:
-    n = len(doc.nodes)
+# Layout with the root placed in a GIVEN box - the screen-relative
+# input `anchor` needs: the host says where the tree lives and how big
+# its world is; the tree flows inside it.
+public define layout_in(doc: SemanticDocument, theme: Theme, face: Font, box: Rect) -> [Measured]:
+    n = length(doc.nodes)
     edit out = []
     loop i in 0..<n:
         out = append(out, Measured{node_id: i, rect: Rect{x: 0, y: 0, wide: 0, high: 0}})
     if n == 0:
         out
     else:
-        rs = measure(doc, theme, doc.root)
-        place(doc, theme, doc.root, 16, 16, rs.w, rs.h, out)
+        place_nodes(doc, theme, face, doc.root, to_whole(box.x), to_whole(box.y), to_whole(box.wide), to_whole(box.high), out)
 
-public define resolve(doc: SemanticDocument, theme: Theme) -> DisplayList:
-    edit list = empty_list()
-    measured = layout(doc, theme)
-    n = len(doc.nodes)
+public define layout(doc: SemanticDocument, theme: Theme, face: Font) -> [Measured]:
+    n = length(doc.nodes)
+    edit out = []
     loop i in 0..<n:
-        node = at(doc.nodes, i)
-        style = lookup_style(theme, node.role)
-        m = at(measured, i)
-        r = m.rect
-        # Skip nodes not reached by the DFS (zero rect) - they aren't in the
-        # tree, so they draw nothing. Provenance = node index: pick_node and
-        # the display list agree on identity for free.
-        if r.high > 0:
-            bg = node_bg(node, style)
-            if bg != "":
-                list = push_cmd(list, DrawRect(r, bg, i))
-            pad = node_pad(node, style)
-            pos = Point{x: r.x + pad, y: r.y + pad}
-            list = push_cmd(list, DrawText(pos, node_text(node), node_fg(node, style), 13, i))
+        out = append(out, Measured{node_id: i, rect: Rect{x: 0, y: 0, wide: 0, high: 0}})
+    if n == 0:
+        out
+    else:
+        rs = measure(doc, theme, face, doc.root)
+        place_nodes(doc, theme, face, doc.root, 16, 16, rs.w, rs.h, out)
+
+# Resolve against a host-given root box (see layout_in).
+public define resolve_in(doc: SemanticDocument, theme: Theme, face: Font, box: Rect) -> DisplayList:
+    paint(doc, theme, face, layout_in(doc, theme, face, box))
+
+public define resolve(doc: SemanticDocument, theme: Theme, face: Font) -> DisplayList:
+    paint(doc, theme, face, layout(doc, theme, face))
+
+# Paint walks the TREE from the root, parent before child, so a container's
+# background lands under its contents. It used to walk the node ARRAY in
+# index order, which quietly required every document to list parents before
+# children - a document that builds bottom-up (children first, root last)
+# had its root paint over everything it contained. The array is storage;
+# the tree is the document.
+define paint(doc: SemanticDocument, theme: Theme, face: Font, measured: [Measured]) -> DisplayList:
+    # An empty document has no root to start from - `root` is still 0.
+    if length(doc.nodes) == 0:
+        empty_list()
+    else:
+        paint_from(doc, theme, face, measured, doc.root, empty_list())
+
+define paint_from(doc: SemanticDocument, theme: Theme, face: Font, measured: [Measured], node_id: int, into: DisplayList) -> DisplayList:
+    edit list = paint_one(doc, theme, face, measured, node_id, into)
+    loop k in child_order(doc, at(doc.nodes, node_id)):
+        if node_shown(at(doc.nodes, k)):
+            list = paint_from(doc, theme, face, measured, k, list)
     list
+
+define paint_one(doc: SemanticDocument, theme: Theme, face: Font, measured: [Measured], i: int, into: DisplayList) -> DisplayList:
+    edit list = into
+    node = at(doc.nodes, i)
+    style = style_of(theme, node)
+    m = at(measured, i)
+    r = m.rect
+    # A zero-height box draws nothing. Provenance = node index, so pick
+    # and the display list agree on identity for free.
+    if r.high > 0:
+        bg = node_bg(node, style)
+        rad = node_radius(node, style)
+        # A border is the box drawn twice: the edge colour full size, the
+        # fill inset by the border width with a correspondingly tighter
+        # radius. Two shaded boxes rather than a stroke primitive - the
+        # ring falls out of the overlap and both edges stay smooth.
+        edge = node_border_colour(node, style)
+        bw = node_border(node, style)
+        ringed = bw > 0 and edge != ""
+        if ringed:
+            list = push_box(list, r, edge, rad, i)
+        inner = if ringed then inset(r, bw) else r
+        irad = if ringed and rad > bw then rad - bw else if ringed then 0 else rad
+        if bg != "":
+            list = push_box(list, inner, bg, irad, i)
+        # `image: name` fills the node's box with a picture the host
+        # resolves - the box is the frame, the art is the content.
+        img = prop_val(node, "image")
+        if img != "":
+            list = push_cmd(list, DrawImage(Point{x: r.x, y: r.y}, img, to_whole(r.wide), to_whole(r.high), "", "alpha", i))
+        # A leaf's own label: `align`/`justify: center` on a node
+        # with text and no children centers the LINE in its box -
+        # the same words that center children, applied to the words.
+        if node_text(node) != "":
+            pad = node_pad(node, style)
+            ts = text_size(node_text(node), node_size(node, style), face)
+            edit tx = r.x + pad
+            edit ty = r.y + pad
+            if prop_val(node, "align") == "center" and length(node.children) == 0:
+                tx = r.x + (to_whole(r.wide) - to_whole(ts.wide)) // 2
+            if prop_val(node, "justify") == "center" and length(node.children) == 0:
+                ty = r.y + (to_whole(r.high) - to_whole(ts.high)) // 2
+            list = push_cmd(list, DrawText(Point{x: tx, y: ty}, node_text(node), node_fg(node, style), node_size(node, style), i))
+    list
+
+# Picking walks the TREE in the same order paint does - parent, then
+# children - and keeps the LAST hit, so whatever was drawn on top is what
+# answers. Walking the node ARRAY instead made the answer depend on where a
+# node happened to sit in storage: a document that lists its root last had
+# the root, which covers the whole window, win every point. Nothing was
+# clickable and nothing lit up, because every pointer got the root back.
+define pick_walk(doc: SemanticDocument, theme: Theme, measured: [Measured], node_id: int, x: int, y: int, so_far: text) -> text:
+    node = at(doc.nodes, node_id)
+    edit best = so_far
+    if rect_contains(at(measured, node_id).rect, Point{x: x, y: y}):
+        d = node_do(node)
+        if d != "":
+            best = d
+        else:
+            style = style_of(theme, node)
+            painted = node_bg(node, style) != "" or node_text(node) != "" or prop_val(node, "image") != ""
+            # A painted child INSIDE a control does not steal its click. A
+            # button is its face, its label and its icon; every one of those
+            # is painted, and every one of them sits on top of the node that
+            # carries the `do:`. Only claim the click as mute when nothing
+            # on the way down claimed it for real - the nearest bound
+            # ancestor keeps it, the way an event finds its handler.
+            if painted and best == "":
+                best = "\{mute\}"
+    loop k in child_order(doc, node):
+        if node_shown(at(doc.nodes, k)):
+            best = pick_walk(doc, theme, measured, k, x, y, best)
+    best
+
+# The click a UI claims at (x, y): the topmost hit node's `do:` name;
+# "\{mute\}" when a PAINTED node without a do: takes the click (a card
+# under a button still blocks the world); "" when the UI is air there -
+# scaffolding panels with no paint and no words claim nothing, so the
+# game underneath keeps its clicks.
+public define pick_spoken(doc: SemanticDocument, theme: Theme, face: Font, box: Rect, x: int, y: int) -> text:
+    if length(doc.nodes) == 0:
+        ""
+    else:
+        pick_walk(doc, theme, layout_in(doc, theme, face, box), doc.root, x, y, "")
+
+# Hit-test against the host-box layout (see layout_in). -1 = miss.
+define pick_id_walk(doc: SemanticDocument, measured: [Measured], node_id: int, x: int, y: int, so_far: int) -> int:
+    edit best = so_far
+    if rect_contains(at(measured, node_id).rect, Point{x: x, y: y}):
+        best = node_id
+    loop k in child_order(doc, at(doc.nodes, node_id)):
+        if node_shown(at(doc.nodes, k)):
+            best = pick_id_walk(doc, measured, k, x, y, best)
+    best
+
+public define pick_node_in(doc: SemanticDocument, theme: Theme, face: Font, box: Rect, x: int, y: int) -> int:
+    if length(doc.nodes) == 0:
+        0 - 1
+    else:
+        pick_id_walk(doc, layout_in(doc, theme, face, box), doc.root, x, y, 0 - 1)
 
 # Hit-test against the same layout the renderer drew. -1 = miss.
 # Last match wins so later (overlapping) nodes sit "on top".
-public define pick_node(doc: SemanticDocument, theme: Theme, x: int, y: int) -> int:
-    measured = layout(doc, theme)
-    edit hit = 0 - 1
-    loop m in measured:
-        if rect_contains(m.rect, Point{x: x, y: y}):
-            hit = m.node_id
-    hit
+public define pick_node(doc: SemanticDocument, theme: Theme, face: Font, x: int, y: int) -> int:
+    if length(doc.nodes) == 0:
+        0 - 1
+    else:
+        pick_id_walk(doc, layout(doc, theme, face), doc.root, x, y, 0 - 1)

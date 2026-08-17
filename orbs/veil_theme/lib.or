@@ -6,18 +6,41 @@
 use veil_role
 use veil_token
 
-public type StyleRule: role_name: text, padding: int, gap: int, fg_colour: text, bg_colour: text, direction: text
+# radius: corner rounding in px, 0 = square. size: text size in px, 0 =
+# "no opinion", which the resolver reads as its 13px body default. Both used
+# to live only as per-node props, so a document had to carry `radius: 7` and
+# `size: 12` - a document saying how a thing LOOKS, which is the theme's job.
+# A node prop still wins where one thing genuinely differs.
+public type StyleRule: role_name: text, padding: int, gap: int, fg_colour: text, bg_colour: text, direction: text, radius: int, size: int, border: int, border_colour: text
 
 public type Theme: rules: [StyleRule]
 
 public define empty_theme() -> Theme:
     Theme{rules: []}
 
-# direction: "" or "column" = children stack vertically (dagens beteende).
+# direction: "" or "column" = children stack vertically (the default).
 # direction: "row" = children flow left-to-right on the same y.
 public define lookup_style(theme: Theme, role: Role) -> StyleRule:
-    edit found = StyleRule{role_name: role.name, padding: 0, gap: 0, fg_colour: "", bg_colour: "", direction: ""}
+    lookup_state(theme, role, "")
+
+# A role in a STATE: hovered, open, focused, whatever the app calls it.
+# The rule is looked up as "role:state" and falls back to plain "role", so
+# a theme only spells out the states it actually changes.
+#
+#     rule("item", ...)          the resting look
+#     rule("item:lit", ...)      the same thing under the pointer
+#
+# Without this a theme needs a separate ROLE per state - item, item_lit,
+# item_on - and the document has to pick the look by name, which is exactly
+# the thing the document is not supposed to know.
+public define lookup_state(theme: Theme, role: Role, state: text) -> StyleRule:
+    edit found = StyleRule{role_name: role.name, padding: 0, gap: 0, fg_colour: "", bg_colour: "", direction: "", radius: 0, size: 0, border: 0, border_colour: ""}
+    edit exact = false
+    want = "{role.name}:{state}"
     loop rule in theme.rules:
-        if rule.role_name == role.name:
+        if rule.role_name == role.name and not exact:
             found = rule
+        if state != "" and rule.role_name == want:
+            found = rule
+            exact = true
     found
