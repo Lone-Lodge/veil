@@ -1,0 +1,6 @@
+name = "veil_motion"
+version = "0.0.1"
+description = "Veil - values that walk to where the document says they should be"
+
+[orbs]
+text = "*"

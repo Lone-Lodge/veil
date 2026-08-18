@@ -29,33 +29,60 @@ public define display_list_json(list: DisplayList) -> text:
                 body = body + "," + piece
     "\{\"commands\":[" + body + "]\}"
 
+# Every command the display list can carry, said in JSON. What the web
+# side does with them is its business, but nothing may be silently
+# dropped: a seam that quietly loses shadows, corners and clipping is a
+# seam that renders a different program.
 define cmd_json(cmd: DrawCmd) -> text:
     choose cmd:
-        DrawRect(r, colour, src) -> rect_json(r, colour, src)
-        DrawRoundRect(r, colour, _radius, src) -> rect_json(r, colour, src)
-        # The web side will want a real box-shadow rather than a rect.
-        DrawShadow(_r, _c, _rad, _blur, _src) -> ""
-        SetClip(_r, _src) -> ""
+        DrawRect(r, colour, src) -> rect_json(r, colour, "0", src)
+        DrawRoundRect(r, colour, corners, src) -> rect_json(r, colour, corners, src)
+        DrawShadow(r, colour, rad, blur, src) -> shadow_json(r, colour, rad, blur, src)
+        # A clip and its release are both events in a stream, so both are
+        # said. A negative box is the release.
+        SetClip(r, rad, src) -> clip_json(r, rad, src)
         DrawText(p, content, colour, size, src) -> text_json(p, content, colour, size, src)
-        DrawIcon(p, icon, size, src) -> icon_json(p, icon, size, src)
-        _ -> ""
+        DrawIcon(p, icon, size, colour, src) -> icon_json(p, icon, size, colour, src)
+        # A ring is an arc in SVG or a conic gradient in CSS; either way
+        # the web needs the numbers, not a rectangle standing in for them.
+        DrawArc(mid, outer, thick, from_deg, to_deg, colour, src) -> arc_json(mid, outer, thick, from_deg, to_deg, colour, src)
+        # CSS border-image IS a nine-slice, so this one crosses whole.
+        DrawNine(r, path, corner, tint, blend, src) -> nine_json(r, path, corner, tint, blend, src)
+        DrawPath(points, colour, src) -> path_json(points, colour, src)
+        DrawImage(p, path, w, h, tint, blend, src) -> image_json(p, path, w, h, tint, src)
+        DrawSprite(p, path, scale, src) -> sprite_json(p, path, scale, src)
 
-define rect_json(r: Rect, colour: text, src: int) -> text:
-    x = r.x
-    y = r.y
-    w = r.wide
-    h = r.high
-    "\{\"kind\":\"rect\",\"x\":{x},\"y\":{y},\"w\":{w},\"h\":{h},\"src\":{src},\"color\":\"" + colour + "\"\}"
+define shadow_json(r: Rect, colour: text, rad: int, blur: int, src: int) -> text:
+    "\{\"kind\":\"shadow\",\"x\":{r.x},\"y\":{r.y},\"w\":{r.wide},\"h\":{r.high},\"radius\":{rad},\"blur\":{blur},\"src\":{src},\"color\":\"" + colour + "\"\}"
+
+define clip_json(r: Rect, rad: int, src: int) -> text:
+    "\{\"kind\":\"clip\",\"x\":{r.x},\"y\":{r.y},\"w\":{r.wide},\"h\":{r.high},\"radius\":{rad},\"src\":{src}\}"
+
+define arc_json(mid: Point, outer: int, thick: int, from_deg: int, to_deg: int, colour: text, src: int) -> text:
+    "\{\"kind\":\"arc\",\"x\":{mid.x},\"y\":{mid.y},\"outer\":{outer},\"thick\":{thick},\"from\":{from_deg},\"to\":{to_deg},\"src\":{src},\"color\":\"" + colour + "\"\}"
+
+define nine_json(r: Rect, path: text, corner: int, tint: text, blend: text, src: int) -> text:
+    "\{\"kind\":\"nine\",\"x\":{r.x},\"y\":{r.y},\"w\":{r.wide},\"h\":{r.high},\"corner\":{corner},\"src\":{src},\"image\":\"" + path + "\",\"tint\":\"" + tint + "\",\"blend\":\"" + blend + "\"\}"
+
+define path_json(points: text, colour: text, src: int) -> text:
+    "\{\"kind\":\"path\",\"points\":\"" + points + "\",\"src\":{src},\"color\":\"" + colour + "\"\}"
+
+define image_json(p: Point, path: text, w: int, h: int, tint: text, src: int) -> text:
+    "\{\"kind\":\"image\",\"x\":{p.x},\"y\":{p.y},\"w\":{w},\"h\":{h},\"src\":{src},\"image\":\"" + path + "\",\"tint\":\"" + tint + "\"\}"
+
+define sprite_json(p: Point, path: text, scale: int, src: int) -> text:
+    "\{\"kind\":\"sprite\",\"x\":{p.x},\"y\":{p.y},\"scale\":{scale},\"src\":{src},\"image\":\"" + path + "\"\}"
+
+define rect_json(r: Rect, colour: text, corners: text, src: int) -> text:
+    "\{\"kind\":\"rect\",\"x\":{r.x},\"y\":{r.y},\"w\":{r.wide},\"h\":{r.high},\"src\":{src},\"radius\":\"" + corners + "\",\"color\":\"" + colour + "\"\}"
 
 define text_json(p: Point, content: text, colour: text, size: int, src: int) -> text:
     x = p.x
     y = p.y
     "\{\"kind\":\"text\",\"x\":{x},\"y\":{y},\"size\":{size},\"src\":{src},\"text\":\"" + content + "\",\"color\":\"" + colour + "\"\}"
 
-define icon_json(p: Point, icon: text, size: int, src: int) -> text:
-    x = p.x
-    y = p.y
-    "\{\"kind\":\"icon\",\"x\":{x},\"y\":{y},\"size\":{size},\"src\":{src},\"icon\":\"" + icon + "\"\}"
+define icon_json(p: Point, icon: text, size: int, colour: text, src: int) -> text:
+    "\{\"kind\":\"icon\",\"x\":{p.x},\"y\":{p.y},\"size\":{size},\"src\":{src},\"icon\":\"" + icon + "\",\"color\":\"" + colour + "\"\}"
 
 # Generic renderer: document × theme → display list → JSON. The
 # whole web painter sits behind this one fn — no widget classes,

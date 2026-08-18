@@ -1,0 +1,211 @@
+# veil_motion - things arrive where they are going instead of jumping there.
+#
+# There is nothing to declare and nothing to tick. A named node's colours
+# and its scroll offset are read through here, and each one walks toward
+# whatever the document last said it should be. Ask for a value, get where
+# it has got to:
+#
+#     bg = smooth_colour("btn|bg", "#4f8cf7ff")
+#     off = smooth("list|y", target)
+#
+# The store lives in the slot table, which is global and survives the frame
+# region, so nothing has to be threaded through the resolver and no app has
+# to hold an animation object. The clock is read per key, so the step is
+# the real time since THAT value was last asked for - which is the frame
+# time for anything on screen, and the right answer for anything that has
+# just appeared.
+#
+# The move is a fraction of the remaining distance per millisecond, so it
+# starts fast and settles - the shape every interface uses, and the one
+# that never overshoots however long a frame takes.
+
+use text
+
+# How long a change takes to arrive. One number, not a knob: a UI where
+# every control picks its own timing reads as sloppy, and 130ms is the
+# span that registers as instant while still being visibly smooth.
+public define ease_ms() -> int = 130
+
+# Anything moved in the last fifth of a second counts as still moving, so
+# an app that only draws when something changed keeps drawing until the
+# motion has landed. Without it the first frame of a fade is also the last.
+define linger_ms() -> int = 200
+
+define stamp(now: int) -> int:
+    slot_set("veil:m:live", now)
+
+# Whether anything is still on its way. An app gates its redraw on this
+# the same way it gates on its own state having changed.
+public define motion_busy() -> truth:
+    if not slot_has("veil:m:live"):
+        return false
+    monotonic_ms() - slot_get_int("veil:m:live") < linger_ms()
+
+# --- one number on its way somewhere ---------------------------------------
+
+# Where `key` has got to on its way to `target`. First ask puts it there;
+# after that it closes the remaining distance in proportion to how much of
+# `ease_ms` has passed.
+public define smooth(key: text, target: int) -> int:
+    kv = "veil:m:v:{key}"
+    kt = "veil:m:t:{key}"
+    now = monotonic_ms()
+    if not slot_has(kv):
+        put = slot_set(kv, target)
+        mark = slot_set(kt, now)
+        return target
+    at_now = slot_get_int(kv)
+    if at_now == target:
+        rest = slot_set(kt, now)
+        return target
+    step = now - slot_get_int(kt)
+    # A gap longer than the whole ease lands the value outright, which is
+    # what you want after a window drag or a sleep - no long crawl to
+    # catch up with where things already are.
+    if step >= ease_ms() or step < 0:
+        done = slot_set(kv, target)
+        mark = slot_set(kt, now)
+        live = stamp(now)
+        return target
+    gap = target - at_now
+    moved = gap * step // ease_ms()
+    # Not enough time has passed to move a whole step. The clock is left
+    # where it was so the time keeps accumulating - which is also what
+    # makes asking twice within one frame give the same answer twice, and
+    # the resolver does ask twice: once to place, once to draw.
+    if moved == 0:
+        return at_now
+    now_at = at_now + moved
+    kept = slot_set(kv, now_at)
+    mark = slot_set(kt, now)
+    live = stamp(now)
+    now_at
+
+# --- how long something has been under the pointer -------------------------
+# A tooltip is a hover that lasted. The clock is already here, so the count
+# is too - an app that had to keep its own would end up with one timer per
+# control, all slightly out of step.
+public define hovered_for(name: text) -> int:
+    if name == "":
+        return 0
+    k = "veil:h:{name}"
+    now = monotonic_ms()
+    if not slot_has(k):
+        put = slot_set(k, now)
+        return 0
+    now - slot_get_int(k)
+
+# The pointer left, so the count starts over next time.
+public define hover_left(name: text) -> int:
+    if name != "":
+        slot_set("veil:h:{name}", monotonic_ms())
+    0
+
+# Put a value exactly where you say, with no travelling. Some changes are
+# not movements: a box that now holds something ELSE has not scrolled, it
+# has been replaced, and sliding it from where the last thing happened to
+# sit is a lie about what just happened.
+public define motion_set(key: text, v: int) -> int:
+    put = slot_set("veil:m:v:{key}", v)
+    slot_set("veil:m:t:{key}", monotonic_ms())
+
+# --- one colour on its way somewhere ---------------------------------------
+# Colours travel as one packed number so the whole thing is a single value
+# in the store, and each channel arrives when the others do.
+
+define nib(c: int) -> int:
+    if c >= 48 and c < 58 then c - 48 else if c >= 97 and c < 103 then c - 87 else if c >= 65 and c < 71 then c - 55 else 0
+
+define hex2(b: [int], i: int) -> int:
+    nib(byte_at(b, i)) * 16 + nib(byte_at(b, i + 1))
+
+# `#rrggbb` or `#rrggbbaa` as one number. Anything else - a gradient, a
+# name, an empty string - has no channels to walk and says so with -1.
+public define packed(c: text) -> int:
+    b = bytes_of(c)
+    n = bytes_count(b)
+    if n < 7 or byte_at(b, 0) != 35:
+        return 0 - 1
+    r = hex2(b, 1)
+    g = hex2(b, 3)
+    bl = hex2(b, 5)
+    a = if n >= 9 then hex2(b, 7) else 255
+    r * 16777216 + g * 65536 + bl * 256 + a
+
+define digit(v: int) -> text:
+    part("0123456789abcdef", v, v + 1)
+
+define two(v: int) -> text:
+    "{digit(v // 16)}{digit(v % 16)}"
+
+public define unpacked(v: int) -> text:
+    "#{two(v // 16777216 % 256)}{two(v // 65536 % 256)}{two(v // 256 % 256)}{two(v % 256)}"
+
+# --- a colour, as ONE value -------------------------------------------------
+# Every channel used to be its own key: four `has`, four `get`, four `set`
+# and eight interpolated strings for every colour of every node, four
+# colours deep. Sixty controls came to three thousand strings built a
+# frame to move nothing at all most of the time.
+#
+# One packed number instead. The channels still travel separately - a
+# packed number cannot be interpolated as one, carrying between channels
+# would send blue through green on its way to nothing - but they are read
+# and written together, which is where the cost was.
+
+define chan(v: int, i: int) -> int:
+    if i == 0 then v // 16777216 % 256 else if i == 1 then v // 65536 % 256 else if i == 2 then v // 256 % 256 else v % 256
+
+define toward(now_at: int, want: int, step: int) -> int:
+    gap = want - now_at
+    if gap == 0:
+        return want
+    moved = gap * step // ease_ms()
+    if moved == 0 then now_at else now_at + moved
+
+# NO colour is treated as the colour it was, at zero alpha. Without that a
+# look that comes and goes only fades one way: in on arrival and gone the
+# instant it stops being asked for, which is the half-animation that reads
+# worse than none at all.
+public define smooth_colour(key: text, target: text) -> text:
+    lit = packed(target)
+    # A gradient or a name has no channels to walk.
+    if lit < 0 and target != "":
+        return target
+    kv = "veil:m:c:{key}"
+    if not slot_has(kv):
+        # Nothing there and nothing asked for: nothing to draw, and
+        # nothing worth remembering.
+        if target == "":
+            return ""
+        # A colour asked for the FIRST time is simply there. Arriving is
+        # not a change.
+        put = slot_set(kv, lit)
+        mark = slot_set("veil:m:d:{key}", monotonic_ms())
+        return target
+    at_now = slot_get_int(kv)
+    # Fading out keeps the colour and takes the alpha away.
+    want = if target == "" then at_now // 256 * 256 else lit
+    if at_now == want:
+        rest = slot_set("veil:m:d:{key}", monotonic_ms())
+        return if want % 256 == 0 then "" else unpacked(want)
+    now = monotonic_ms()
+    step = now - slot_get_int("veil:m:d:{key}")
+    if step >= ease_ms() or step < 0:
+        done = slot_set(kv, want)
+        mark = slot_set("veil:m:d:{key}", now)
+        live = stamp(now)
+        return if want % 256 == 0 then "" else unpacked(want)
+    r = toward(chan(at_now, 0), chan(want, 0), step)
+    g = toward(chan(at_now, 1), chan(want, 1), step)
+    b = toward(chan(at_now, 2), chan(want, 2), step)
+    a = toward(chan(at_now, 3), chan(want, 3), step)
+    moved_to = r * 16777216 + g * 65536 + b * 256 + a
+    # Not enough time has passed to move a whole step anywhere. The clock
+    # stays put so the time keeps accumulating, which is also what makes
+    # asking twice in one frame answer twice the same.
+    if moved_to == at_now:
+        return if at_now % 256 == 0 then "" else unpacked(at_now)
+    kept = slot_set(kv, moved_to)
+    mark = slot_set("veil:m:d:{key}", now)
+    live = stamp(now)
+    if moved_to % 256 == 0 then "" else unpacked(moved_to)

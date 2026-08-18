@@ -226,6 +226,97 @@ public define edit_word(e: Edit) -> Edit:
         hi = hi + 1
     Edit{content: e.content, caret: hi, anchor: lo}
 
+# --- more than one line ----------------------------------------------------
+# A newline is a character like any other; what it needs is a way to walk
+# past it. Up and down keep the COLUMN they started from, so running the
+# caret down through a short line and out the other side puts it back
+# where it was - which is what every editor does and what your hand
+# remembers doing.
+
+# A newline cannot be written inline in Orion, so it is built: one byte,
+# set to ten.
+public define newline() -> text:
+    text_of(set(bytes_zeros(1), 0, 10))
+
+public define edit_break(e: Edit) -> Edit:
+    edit_paste(e, newline())
+
+# Which line the caret is on, and how far along it.
+public define edit_row(e: Edit) -> int:
+    b = bytes_of(edit_before(e))
+    edit rows = 0
+    loop i in 0..<bytes_count(b):
+        if byte_at(b, i) == 10:
+            rows = rows + 1
+    rows
+
+public define edit_col(e: Edit) -> int:
+    b = bytes_of(edit_before(e))
+    edit last = 0 - 1
+    loop i in 0..<bytes_count(b):
+        if byte_at(b, i) == 10:
+            last = i
+    bytes_count(b) - last - 1
+
+define line_start(e: Edit, row: int) -> int:
+    if row <= 0:
+        return 0
+    b = bytes_of(e.content)
+    edit seen = 0
+    edit at_i = bytes_count(b)
+    loop i in 0..<bytes_count(b):
+        if byte_at(b, i) == 10:
+            seen = seen + 1
+            if seen == row and at_i == bytes_count(b):
+                at_i = i + 1
+    at_i
+
+define line_len(e: Edit, row: int) -> int:
+    b = bytes_of(e.content)
+    n = bytes_count(b)
+    from = line_start(e, row)
+    edit i = from
+    loop:
+        if i >= n or byte_at(b, i) == 10:
+            break
+        i = i + 1
+    i - from
+
+define rows_in(e: Edit) -> int:
+    b = bytes_of(e.content)
+    edit rows = 0
+    loop i in 0..<bytes_count(b):
+        if byte_at(b, i) == 10:
+            rows = rows + 1
+    rows
+
+# Up and down a whole line, landing at the same column when the line is
+# long enough and at its end when it is not.
+public define edit_up(e: Edit) -> Edit:
+    row = edit_row(e)
+    if row <= 0:
+        return moved(e, 0)
+    col = edit_col(e)
+    room = line_len(e, row - 1)
+    moved(e, line_start(e, row - 1) + if col > room then room else col)
+
+public define edit_down(e: Edit) -> Edit:
+    row = edit_row(e)
+    if row >= rows_in(e):
+        return moved(e, bytes_count(bytes_of(e.content)))
+    col = edit_col(e)
+    room = line_len(e, row + 1)
+    moved(e, line_start(e, row + 1) + if col > room then room else col)
+
+# Home and End on the LINE, which is what they mean once there is more
+# than one of them.
+public define edit_line_home(e: Edit) -> Edit:
+    moved(e, line_start(e, edit_row(e)))
+
+public define edit_line_end(e: Edit) -> Edit:
+    row = edit_row(e)
+    moved(e, line_start(e, row) + line_len(e, row))
+
 # Paste replaces the selection, like typing does.
 public define edit_paste(e: Edit, t: text) -> Edit:
     flat = edit_drop(e)

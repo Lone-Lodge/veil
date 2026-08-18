@@ -14,7 +14,7 @@ public type Measured: node_id: int, rect: Rect
 # the pixel measured and the pixel drawn come from one engine.
 public define text_size(content: text, size_px: int, face: Font) -> Size:
     scale = to_real(size_px) / to_real(face.upm)
-    letters = bytes_of(content)
+    letters = bytes_of(plain_of(content))
     n = bytes_count(letters)
     edit wide = 0.0
     edit prev = 0
@@ -40,13 +40,140 @@ public define line_high(size_px: int, face: Font) -> int:
     scale = to_real(size_px) / to_real(face.upm)
     to_whole(to_real(font_ascent(face) - font_descent(face)) * scale + 0.5)
 
+# --- a colour inside a line -------------------------------------------------
+# `text: "Vanlig [#e8a33c]gul[] text"` - part of a line in another ink,
+# without a second node and without a Rich Text control. A word picked
+# out in colour is most of what rich text is ever asked for, and it is
+# the part a single loaded face can actually do: weight would need a
+# second file, and slant a third.
+#
+# The size does not change inside a line, so MEASURING is unaffected -
+# the markers are simply not counted. Wrapping, the caret and everything
+# else that walks text keep working exactly as they did.
+
+define marker_open() -> int = 91
+define marker_shut() -> int = 93
+
+# The line with its markers taken out: what it actually reads as, and
+# what every measurement is of.
+public define plain_of(content: text) -> text:
+    b = bytes_of(content)
+    n = bytes_count(b)
+    if not has_runs(b, n):
+        return content
+    edit out = ""
+    edit i = 0
+    loop:
+        if i >= n:
+            break
+        if byte_at(b, i) == marker_open():
+            edit j = i
+            loop:
+                if j >= n or byte_at(b, j) == marker_shut():
+                    break
+                j = j + 1
+            i = j + 1
+        else:
+            edit j = i
+            loop:
+                if j >= n or byte_at(b, j) == marker_open():
+                    break
+                j = j + 1
+            out = "{out}{text_of(bytes_part(b, i, j))}"
+            i = j
+    out
+
+public define has_runs(b: [int], n: int) -> truth:
+    edit any = false
+    loop i in 0..<n:
+        if byte_at(b, i) == marker_open():
+            any = true
+    any
+
+# The line as alternating colour and words: ["", "Vanlig ", "#e8a33c",
+# "gul", "", " text"]. An empty colour means the node's own ink.
+public define runs_of(content: text) -> [text]:
+    b = bytes_of(content)
+    n = bytes_count(b)
+    edit out = []
+    edit ink = ""
+    edit i = 0
+    loop:
+        if i >= n:
+            break
+        if byte_at(b, i) == marker_open():
+            edit j = i + 1
+            loop:
+                if j >= n or byte_at(b, j) == marker_shut():
+                    break
+                j = j + 1
+            # `[]` closes and goes back to the node's own ink.
+            ink = if j > i + 1 then text_of(bytes_part(b, i + 1, j)) else ""
+            i = j + 1
+        else:
+            edit j = i
+            loop:
+                if j >= n or byte_at(b, j) == marker_open():
+                    break
+                j = j + 1
+            if j > i:
+                out = append(out, ink)
+                out = append(out, text_of(bytes_part(b, i, j)))
+            i = j
+    out
+
+# The longest beginning of `content` that fits, with a full stop after it
+# to say there is more. Text that does not fit was cut mid-letter until
+# now, which reads as a rendering fault rather than as a shortened name -
+# and every list, every table cell and every breadcrumb needs it.
+#
+# Whole characters only, so it can never stop halfway through an å.
+public define trim_to(content: text, size_px: int, face: Font, max_w: int) -> text:
+    if max_w <= 0 or text_size(content, size_px, face).wide <= max_w:
+        return content
+    tail = "..."
+    room = max_w - text_size(tail, size_px, face).wide
+    if room <= 0:
+        return tail
+    b = bytes_of(content)
+    n = bytes_count(b)
+    edit cut = 0
+    edit i = 0
+    loop:
+        if i >= n:
+            break
+        step = cp_step(b, i)
+        if text_size(text_of(bytes_part(b, 0, i + step)), size_px, face).wide > room:
+            break
+        i = i + step
+        cut = i
+    "{text_of(bytes_part(b, 0, cut))}{tail}"
+
 # Break `content` into lines that each fit `max_w`, at spaces. Greedy, which
 # is what every UI does - the fancy algorithms are for books.
 #
 # A word longer than the whole width stays on its own line and overflows
 # rather than being cut mid-word: a clipped word you can still read beats a
 # broken one you cannot.
+# Lines the writer put in, before any breaking the width forces. A text
+# you can EDIT has newlines in it, and a wrapper that only knows about
+# spaces would run two paragraphs together.
+public define hard_lines(content: text) -> [text]:
+    # `lines` rather than a literal, because the newline cannot be written
+    # inline here - the text orb has the same note on itself.
+    lines(content)
+
 public define wrap_text(content: text, size_px: int, face: Font, max_w: int) -> [text]:
+    paras = hard_lines(content)
+    if length(paras) > 1:
+        edit all_of = []
+        loop para in paras:
+            loop l in wrap_one(para, size_px, face, max_w):
+                all_of = append(all_of, l)
+        return all_of
+    wrap_one(content, size_px, face, max_w)
+
+define wrap_one(content: text, size_px: int, face: Font, max_w: int) -> [text]:
     if max_w <= 0 or length(content) == 0:
         return [content]
     # Each word measured ONCE and the running width carried along. The
@@ -73,6 +200,55 @@ public define wrap_text(content: text, size_px: int, face: Font, max_w: int) -> 
     if line != "":
         lines = append(lines, line)
     if length(lines) == 0 then [content] else lines
+
+# Where a byte offset sits once the text has been broken into lines: which
+# line, and how far along it. Editing wrapped text is impossible without
+# this - the caret has a place in the STRING and has to be given a place
+# on the SCREEN, measured with the same advances that drew the letters.
+public define caret_spot(content: text, size_px: int, face: Font, max_w: int, mark: int) -> Size:
+    lines = wrap_text(content, size_px, face, max_w)
+    edit seen = 0
+    edit row = 0
+    edit col = 0
+    edit found = false
+    edit i = 0
+    loop l in lines:
+        n = bytes_count(bytes_of(l))
+        # The line the caret is ON is the first one it fits in. A caret at
+        # the very end of a line and one at the start of the next are the
+        # same offset; the first is the one a person means.
+        if not found and mark <= seen + n:
+            row = i
+            col = mark - seen
+            found = true
+        # A break the wrapper made eats the space; one the writer made eats
+        # the newline. Either way one byte goes.
+        seen = seen + n + 1
+        i = i + 1
+    last = if length(lines) == 0 then "" else at(lines, length(lines) - 1)
+    r = if found then row else if length(lines) == 0 then 0 else length(lines) - 1
+    c = if found then col else bytes_count(bytes_of(last))
+    on_line = if length(lines) == 0 then "" else at(lines, r)
+    b = bytes_of(on_line)
+    cut = if c > bytes_count(b) then bytes_count(b) else if c < 0 then 0 else c
+    Size{wide: to_real(text_size(text_of(bytes_part(b, 0, cut)), size_px, face).wide), high: to_real(r * line_high(size_px, face))}
+
+# The other way round: a point in the block becomes a byte offset. What a
+# click in wrapped text has to answer.
+public define caret_from(content: text, size_px: int, face: Font, max_w: int, px: int, py: int) -> int:
+    lines = wrap_text(content, size_px, face, max_w)
+    if length(lines) == 0:
+        return 0
+    lh = line_high(size_px, face)
+    raw = if lh > 0 then py // lh else 0
+    row = if raw < 0 then 0 else if raw >= length(lines) then length(lines) - 1 else raw
+    edit seen = 0
+    edit i = 0
+    loop l in lines:
+        if i < row:
+            seen = seen + bytes_count(bytes_of(l)) + 1
+        i = i + 1
+    seen + caret_at(at(lines, row), size_px, face, px)
 
 # How tall that wrapped block is.
 public define wrapped_high(content: text, size_px: int, face: Font, max_w: int) -> int:

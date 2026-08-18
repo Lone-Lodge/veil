@@ -22,6 +22,7 @@ use veil_theme
 use ori_display
 use veil_interaction
 use veil_measure
+use veil_motion
 use veil_edit
 use veil_resolver
 use veil_web
@@ -39,6 +40,17 @@ define over_wide(lines: [text], size: int, face: Font, max_w: int) -> int:
         if text_size(l, size, face).wide > max_w:
             bad = bad + 1
     bad
+
+# Does every line this list draws start and end inside [top, bottom]?
+define text_top_in(list: DisplayList, top: number, bottom: number) -> truth:
+    edit ok = true
+    loop cmd in list.commands:
+        choose cmd:
+            DrawText(pt, _c, _ink, size, _s) ->
+                if pt.y < top or pt.y + to_real(size) > bottom:
+                    ok = false
+            _ -> 0
+    ok
 
 # ---- the harness ----
 # Counters live in slots: the process-global store, which is also how the
@@ -470,6 +482,286 @@ define main() -> int:
     tr2 = Node{role: role("bar"), props: [NodeProp{key: "w", content: "200"}, NodeProp{key: "h", content: "10"}, NodeProp{key: "layout", content: "row"}], children: [1, 2]}
     prow = layout_in(SemanticDocument{root: 0, nodes: [tr2, fl, grow_fl]}, p_th, face, Rect{x: 0, y: 0, wide: 200, high: 10})
     check("a share and a grow share ONE row", 200, to_whole(at(prow, 1).rect.wide) + to_whole(at(prow, 2).rect.wide))
+    # Motion: a value asked for twice with time in between should be
+    # part of the way there, and all of the way there once the ease has
+    # had its span. Nothing declares this and nothing ticks it.
+    born = smooth("check|x", 0)
+    nap = sleep_ms(40)
+    part_way = smooth("check|x", 100)
+    check_true("a value moves part of the way", part_way > 0 and part_way < 100)
+    nap2 = sleep_ms(ease_ms() + 40)
+    check("and lands when the ease has had its time", 100, smooth("check|x", 100))
+    # A colour that is not there is that colour at no alpha, so a look
+    # that comes and goes fades both ways.
+    check_text("an absent colour has nothing to fade from", "", smooth_colour("check|c", ""))
+    check_text("and a gradient is handed straight through", "grad:112233:445566", smooth_colour("check|g", "grad:112233:445566"))
+    # A picked name has to survive the frame it was found in - every app
+    # holds the hovered and the focused one across frames, which is what
+    # they are for. Asking twice gives the SAME storage, so a long run
+    # does not pile up a copy per frame.
+    once = pick_spoken(sp_doc, sp_theme, face, sp_box, 10, 10)
+    twice = pick_spoken(sp_doc, sp_theme, face, sp_box, 10, 10)
+    check_text("a picked name is kept", "go", once)
+    check_true("and asking again hands back the same one", once is twice)
+    # An explicit zero is a size. Without it a section could not fold,
+    # because asking for no height gave you the height of the contents.
+    zout = Node{role: role("bar"), props: [NodeProp{key: "w", content: "200"}], children: [1]}
+    zfold = Node{role: role("fill"), props: [NodeProp{key: "w", content: "50"}, NodeProp{key: "h", content: "0"}], children: [2]}
+    zkid = Node{role: role("fill"), props: [NodeProp{key: "w", content: "50"}, NodeProp{key: "h", content: "40"}], children: []}
+    zm = layout(SemanticDocument{root: 0, nodes: [zout, zfold, zkid]}, p_th, face)
+    check("a height of zero IS zero", 0, to_whole(at(zm, 1).rect.high))
+    check("and the box around it folds with it", 0, to_whole(at(zm, 0).rect.high))
+    # One number moves the whole interface. Lengths scale; ratios do not.
+    set_back = set_scale(200)
+    scdoc = SemanticDocument{root: 0, nodes: [Node{role: role("bar"), props: [NodeProp{key: "w", content: "50"}, NodeProp{key: "h", content: "20"}, NodeProp{key: "pad", content: "4"}], children: []}]}
+    scm = layout(scdoc, p_th, face)
+    check("twice the scale is twice the box", 100, to_whole(at(scm, 0).rect.wide))
+    back = set_scale(100)
+    scm2 = layout(scdoc, p_th, face)
+    check("and back again is the box it was", 50, to_whole(at(scm2, 0).rect.wide))
+    check("a share is a ratio, not a length", 100, scale_now())
+    # A flow carries on to the next line rather than shrinking until the
+    # words are cut. Three 80-wide boxes in a 200-wide row is two lines.
+    fbox = Node{role: role("blk"), props: [NodeProp{key: "w", content: "80"}, NodeProp{key: "h", content: "20"}], children: []}
+    frow = Node{role: role("bar"), props: [NodeProp{key: "w", content: "200"}, NodeProp{key: "layout", content: "flow"}, NodeProp{key: "gap", content: "10"}], children: [1, 2, 3]}
+    fm = layout(SemanticDocument{root: 0, nodes: [frow, fbox, fbox, fbox]}, p_th, face)
+    check("the third box drops to the next line", 16, to_whole(at(fm, 3).rect.x))
+    check("and sits a line down", 46, to_whole(at(fm, 3).rect.y))
+    check("the row is two lines tall", 50, to_whole(at(fm, 0).rect.high))
+    check("and the second box stays on the first line", 106, to_whole(at(fm, 2).rect.x))
+    # What lies in a direction, out of the rects the layout already has.
+    # A D-pad, the arrow keys and a screen reader all ask this, and
+    # nobody keeps a list in step with the screen.
+    dl = Node{role: role("blk"), props: [NodeProp{key: "do", content: "left"}, NodeProp{key: "w", content: "60"}, NodeProp{key: "h", content: "30"}], children: []}
+    dr = Node{role: role("blk"), props: [NodeProp{key: "do", content: "right"}, NodeProp{key: "w", content: "60"}, NodeProp{key: "h", content: "30"}], children: []}
+    dd = Node{role: role("blk"), props: [NodeProp{key: "do", content: "under"}, NodeProp{key: "w", content: "60"}, NodeProp{key: "h", content: "30"}], children: []}
+    drow = Node{role: role("bar"), props: [NodeProp{key: "gap", content: "10"}, NodeProp{key: "layout", content: "row"}], children: [1, 2]}
+    dcol = Node{role: role("bar"), props: [NodeProp{key: "gap", content: "10"}, NodeProp{key: "layout", content: "column"}], children: [4, 3]}
+    ddoc = SemanticDocument{root: 0, nodes: [dcol, dl, dr, dd, drow]}
+    dm = layout(ddoc, p_th, face)
+    check_text("right of left is right", "right", near_toward(ddoc, dm, "left", 1, 0))
+    check_text("left of right is left", "left", near_toward(ddoc, dm, "right", 0 - 1, 0))
+    check_text("below left is the one underneath", "under", near_toward(ddoc, dm, "left", 0, 1))
+    check_text("nothing lies above the top row", "", near_toward(ddoc, dm, "left", 0, 0 - 1))
+    # Reading order comes out of where things ended up, not out of a list
+    # somebody keeps. Down the page, then left to right within a line.
+    ro = reading_order(ddoc, dm)
+    check("three named things are read", 3, length(ro))
+    check_text("the left one first", "left", at(ro, 0))
+    check_text("then the one beside it", "right", at(ro, 1))
+    check_text("then the line below", "under", at(ro, 2))
+    check_text("a label is what a node is called", "Stäng", spoken_name(Node{role: role("btn"), props: [NodeProp{key: "says", content: "Stäng"}, NodeProp{key: "do", content: "x"}], children: []}))
+    check_text("its words when it has none", "Spara", spoken_name(Node{role: role("btn"), props: [NodeProp{key: "text", content: "Spara"}], children: []}))
+    # Only the rows you can see. Ten thousand rows of 28 in a box of 200,
+    # scrolled to 1000: about nine rows built, and the empty space above
+    # and below keeps the scrollbar honest.
+    win_a = row_window(10000, 28, 200, 1000)
+    check("it starts a row early", 34, win_a.first)
+    check("and builds only what fits, plus slack", 10, win_a.count)
+    check("the space above is the rows skipped", 952, win_a.above)
+    check("and the rest is below", 278768, win_a.below)
+    win_b = row_window(3, 28, 200, 0)
+    check("a short list is all of it", 3, win_b.count)
+    check("with nothing left below", 0, win_b.below)
+    # `fade` dims a whole subtree at once - the box, its border and the
+    # words in it go together, which is the only way a panel can leave
+    # without coming apart.
+    fkid = Node{role: role("fill"), props: [NodeProp{key: "w", content: "20"}, NodeProp{key: "h", content: "10"}], children: []}
+    fout = Node{role: role("bar"), props: [NodeProp{key: "w", content: "60"}, NodeProp{key: "h", content: "20"}, NodeProp{key: "fade", content: "50"}], children: [1]}
+    fdoc = SemanticDocument{root: 0, nodes: [fout, fkid]}
+    check("a faded subtree still draws everything", 2, cmd_count(resolve(fdoc, p_th, face)))
+    # More than one line. Up and down keep the column they started from,
+    # so running out through a short line and back puts the caret where
+    # it was.
+    ml = edit_new("ett tva tre")
+    ml2 = edit_break(edit_put(ml, 3))
+    check("a break makes two lines", 2, edit_row(edit_end(ml2)) + 1)
+    check("and the caret is on the second", 1, edit_row(ml2))
+    check("at its start", 0, edit_col(ml2))
+    up_one = edit_up(edit_line_end(ml2))
+    check("up lands on the first line", 0, edit_row(up_one))
+    check("at the end of it, which is shorter", 3, edit_col(up_one))
+    check("and down comes back", 1, edit_row(edit_down(up_one)))
+    check("home goes to the start of the LINE", 0, edit_col(edit_line_home(edit_end(ml2))))
+    # The framework draws the caret and the selection inside wrapped
+    # text: one command for the words, one for the plate, one for the bar.
+    mdoc = SemanticDocument{root: 0, nodes: [Node{role: role("bar"), props: [NodeProp{key: "ink", content: "#ffffffff"}, NodeProp{key: "text", content: "ett tva tre fyra fem sex"}, NodeProp{key: "wrap", content: "1"}, NodeProp{key: "w", content: "80"}, NodeProp{key: "caret", content: "9"}, NodeProp{key: "anchor", content: "4"}, NodeProp{key: "lit", content: "1"}], children: []}]}
+    mcmds = cmd_count(resolve(mdoc, p_th, face))
+    check_true("a selection and a caret are drawn with the lines", mcmds > 3)
+    spot = caret_spot("ett tva tre fyra", 13, face, 80, 13)
+    check_true("a caret past the first break sits a line down", spot.high > 0.0)
+    check("and one at the very start does not", 0, to_whole(caret_spot("ett tva", 13, face, 80, 0).high))
+    # A node that hangs off another one, out of the flow, and flipped
+    # rather than cut off when the side it wants is the side with no room.
+    an_btn = Node{role: role("blk"), props: [NodeProp{key: "do", content: "btn"}, NodeProp{key: "w", content: "60"}, NodeProp{key: "h", content: "20"}], children: []}
+    an_pop = Node{role: role("blk"), props: [NodeProp{key: "at", content: "btn"}, NodeProp{key: "side", content: "below"}, NodeProp{key: "w", content: "80"}, NodeProp{key: "h", content: "40"}], children: []}
+    an_page = Node{role: role("bar"), props: [NodeProp{key: "w", content: "200"}, NodeProp{key: "h", content: "200"}, NodeProp{key: "layout", content: "column"}], children: [1, 2]}
+    an_doc = SemanticDocument{root: 0, nodes: [an_page, an_btn, an_pop]}
+    anm = layout_in(an_doc, p_th, face, Rect{x: 0, y: 0, wide: 200, high: 200})
+    check("it opens under the thing it hangs off", 20, to_whole(at(anm, 2).rect.y))
+    check("and lines up with it", 0, to_whole(at(anm, 2).rect.x))
+    check("and takes no room in the line", 0, to_whole(at(anm, 1).rect.y))
+    # No room below: it opens upwards instead of walking off the screen.
+    lowb = Node{role: role("blk"), props: [NodeProp{key: "do", content: "btn"}, NodeProp{key: "w", content: "60"}, NodeProp{key: "h", content: "20"}, NodeProp{key: "at_y", content: "170"}, NodeProp{key: "at_x", content: "0"}], children: []}
+    lowdoc = SemanticDocument{root: 0, nodes: [an_page, lowb, an_pop]}
+    lowm = layout_in(lowdoc, p_th, face, Rect{x: 0, y: 0, wide: 200, high: 200})
+    check("with no room below it opens above", 130, to_whole(at(lowm, 2).rect.y))
+    # A name too long for its box is shortened with a full stop, on a
+    # whole character, rather than cut mid-letter.
+    long_one = "Ett ganska langt namn som inte far plats"
+    cut_one = trim_to(long_one, 13, face, 90)
+    check_true("it is shorter than what it started as", length(cut_one) < length(long_one))
+    check_true("it says there is more", length(cut_one) > 3)
+    check_true("and it fits", to_whole(text_size(cut_one, 13, face).wide) <= 90)
+    check_text("something that fits is left alone", "kort", trim_to("kort", 13, face, 200))
+    # At least this, at most that.
+    bx = Node{role: role("blk"), props: [NodeProp{key: "text", content: "x"}, NodeProp{key: "min_w", content: "120"}, NodeProp{key: "max_h", content: "9"}], children: []}
+    bm = layout(SemanticDocument{root: 0, nodes: [bx]}, p_th, face)
+    check("a little box is held up to its least", 120, to_whole(at(bm, 0).rect.wide))
+    check("and a tall one down to its most", 9, to_whole(at(bm, 0).rect.high))
+    # A radius per corner: a tab is round on top and square underneath.
+    tabnode = Node{role: role("bar"), props: [NodeProp{key: "w", content: "60"}, NodeProp{key: "h", content: "24"}, NodeProp{key: "radius", content: "8 8 0 0"}], children: []}
+    check("four corners still draw one box", 1, cmd_count(resolve(SemanticDocument{root: 0, nodes: [tabnode]}, p_th, face)))
+    check("and one number still works", 1, cmd_count(resolve(SemanticDocument{root: 0, nodes: [Node{role: role("bar"), props: [NodeProp{key: "w", content: "60"}, NodeProp{key: "h", content: "24"}, NodeProp{key: "radius", content: "6"}], children: []}]}, p_th, face)))
+    # A line pushed to the far side of its box.
+    endnode = Node{role: role("bar"), props: [NodeProp{key: "ink", content: "#ffffffff"}, NodeProp{key: "text", content: "hi"}, NodeProp{key: "w", content: "100"}, NodeProp{key: "h", content: "20"}, NodeProp{key: "align", content: "end"}], children: []}
+    check("right-aligned text still draws its line", 2, cmd_count(resolve(SemanticDocument{root: 0, nodes: [endnode]}, p_th, face)))
+    # A tooltip is an anchored node on a layer above everything, so it
+    # lands under what it explains and disturbs nothing around it.
+    tbtn = Node{role: role("blk"), props: [NodeProp{key: "do", content: "b"}, NodeProp{key: "w", content: "50"}, NodeProp{key: "h", content: "20"}], children: []}
+    ttip = Node{role: role("blk"), props: [NodeProp{key: "at", content: "b"}, NodeProp{key: "side", content: "below"}, NodeProp{key: "layer", content: "3"}, NodeProp{key: "w", content: "70"}, NodeProp{key: "h", content: "24"}], children: []}
+    tside = Node{role: role("blk"), props: [NodeProp{key: "w", content: "50"}, NodeProp{key: "h", content: "20"}], children: []}
+    tpage = Node{role: role("bar"), props: [NodeProp{key: "w", content: "300"}, NodeProp{key: "h", content: "300"}, NodeProp{key: "layout", content: "column"}], children: [1, 2, 3]}
+    tdoc = SemanticDocument{root: 0, nodes: [tpage, tbtn, ttip, tside]}
+    tm = layout_in(tdoc, p_th, face, Rect{x: 0, y: 0, wide: 300, high: 300})
+    check("the tip sits under what it explains", 20, to_whole(at(tm, 2).rect.y))
+    check("and the box beside it never moved", 20, to_whole(at(tm, 3).rect.y))
+    # And how long the pointer has rested somewhere is the framework s
+    # count, not one timer per control kept by an app.
+    first_ask = hovered_for("hovertest")
+    check("the first ask is nothing yet", 0, first_ask)
+    napped = sleep_ms(30)
+    check_true("and then it is how long it has been", hovered_for("hovertest") >= 25)
+    # The inspector draws every box as four hairlines, so a screen of N
+    # boxes gains 4N commands and hides nothing it is drawn over.
+    ins_before = cmd_count(resolve(st, dt, face))
+    ins_after = cmd_count(with_boxes(st, dt, face, layout(st, dt, face), resolve(st, dt, face)))
+    check_true("the inspector adds four lines a box", ins_after >= ins_before + 4)
+    check_true("and says what a box is", length(box_told(st, layout(st, dt, face), 0)) > 0)
+    # A column holding a flow that wraps has to be as tall as the WRAPPED
+    # flow, or everything written after the flow falls out of the bottom.
+    fb = Node{role: role("blk"), props: [NodeProp{key: "w", content: "70"}, NodeProp{key: "h", content: "20"}], children: []}
+    ffl = Node{role: role("bar"), props: [NodeProp{key: "layout", content: "flow"}, NodeProp{key: "gap", content: "6"}, NodeProp{key: "fill", content: "1"}], children: [1, 2, 3]}
+    ftail = Node{role: role("blk"), props: [NodeProp{key: "w", content: "40"}, NodeProp{key: "h", content: "10"}], children: []}
+    fcol = Node{role: role("bar"), props: [NodeProp{key: "w", content: "160"}, NodeProp{key: "layout", content: "column"}], children: [4, 5]}
+    fdoc2 = SemanticDocument{root: 0, nodes: [fcol, fb, fb, fb, ffl, ftail]}
+    fm2 = layout(fdoc2, p_th, face)
+    check("the flow itself is two lines", 46, to_whole(at(fm2, 4).rect.high))
+    check("what comes after it starts below it", 46, to_whole(at(fm2, 5).rect.y) - 16)
+    check("and the column holds all of it", 56, to_whole(at(fm2, 0).rect.high))
+    # A tab is as wide as its own name. A row of named boxes in a flow
+    # that has room for all of them must not hand any of them less than
+    # its text plus its padding, or the name is painted over by the tab
+    # beside it - which is how a dock tab said "Utforska".
+    tabw = Node{role: role("blk"), props: [NodeProp{key: "text", content: "Utforskare"}, NodeProp{key: "pad", content: "11"}, NodeProp{key: "h", content: "28"}], children: []}
+    tabn = Node{role: role("blk"), props: [NodeProp{key: "text", content: "Sok"}, NodeProp{key: "pad", content: "11"}, NodeProp{key: "h", content: "28"}], children: []}
+    tabrow = Node{role: role("bar"), props: [NodeProp{key: "layout", content: "flow"}, NodeProp{key: "gap", content: "2"}, NodeProp{key: "pad", content: "4"}, NodeProp{key: "fill", content: "1"}], children: [1, 2]}
+    tabcol = Node{role: role("bar"), props: [NodeProp{key: "w", content: "260"}, NodeProp{key: "layout", content: "column"}], children: [3]}
+    tm2 = layout(SemanticDocument{root: 0, nodes: [tabcol, tabw, tabn, tabrow]}, p_th, face)
+    tab_size = if lookup_style(p_th, role("blk")).size > 0 then lookup_style(p_th, role("blk")).size else 13
+    want_tab = text_size("Utforskare", tab_size, face).wide + 22
+    check("a tab is as wide as its own name", want_tab, to_whole(at(tm2, 1).rect.wide))
+
+    # A box shorter than its own padding still draws its line INSIDE
+    # itself. Padding that does not fit is a tight box, not a licence to
+    # paint below one.
+    tightn = Node{role: role("blk"), props: [NodeProp{key: "text", content: "Konsol"}, NodeProp{key: "pad", content: "26"}, NodeProp{key: "w", content: "120"}, NodeProp{key: "h", content: "28"}], children: []}
+    tightl = resolve(SemanticDocument{root: 0, nodes: [tightn]}, p_th, face)
+    check_true("and a squeezed box keeps its line inside itself", text_top_in(tightl, 0.0, 28.0))
+
+    # A row with more content than room takes the debt out of the children
+    # that named no width. A stated width is a statement.
+    sqfix = Node{role: role("blk"), props: [NodeProp{key: "w", content: "260"}, NodeProp{key: "h", content: "20"}], children: []}
+    sqflex = Node{role: role("blk"), props: [NodeProp{key: "w", content: "900"}, NodeProp{key: "h", content: "20"}, NodeProp{key: "grow", content: "1"}], children: []}
+    sqflex2 = Node{role: role("bar"), props: [NodeProp{key: "grow", content: "1"}], children: [4]}
+    sqrow = Node{role: role("bar"), props: [NodeProp{key: "w", content: "1000"}, NodeProp{key: "layout", content: "row"}], children: [1, 3]}
+    sqm = layout(SemanticDocument{root: 0, nodes: [sqrow, sqfix, sqflex, sqflex2, sqflex]}, p_th, face)
+    check("a stated width survives a crowded row", 260, to_whole(at(sqm, 1).rect.wide))
+    check("and the child that named none gives up the room", 740, to_whole(at(sqm, 3).rect.wide))
+
+    # A node the pointer goes straight through, and everything in it.
+    ppass = Node{role: role("blk"), props: [NodeProp{key: "pass", content: "1"}, NodeProp{key: "w", content: "80"}, NodeProp{key: "h", content: "40"}], children: []}
+    punder = Node{role: role("blk"), props: [NodeProp{key: "do", content: "under"}, NodeProp{key: "w", content: "80"}, NodeProp{key: "h", content: "40"}], children: []}
+    pstack = Node{role: role("bar"), props: [NodeProp{key: "w", content: "80"}, NodeProp{key: "h", content: "40"}, NodeProp{key: "layout", content: "stack"}], children: [1, 2]}
+    pdoc2 = SemanticDocument{root: 0, nodes: [pstack, punder, ppass]}
+    pbox = Rect{x: 0, y: 0, wide: 80, high: 40}
+    check_text("the pointer reaches what is underneath", "under", pick_spoken(pdoc2, p_th, face, pbox, 40, 20))
+    # Laying the same document out twice must give the same answer. If
+    # anything that travels leaks into the LAYOUT, a screen rebuilt on the
+    # next frame comes out a different size - which is a screen that
+    # shivers for no reason anybody can see.
+    stdoc = SemanticDocument{root: 0, nodes: [Node{role: role("bar"), props: [NodeProp{key: "w", content: "200"}, NodeProp{key: "do", content: "box"}, NodeProp{key: "layout", content: "column"}], children: [1]}, Node{role: role("blk"), props: [NodeProp{key: "text", content: "en text som far brytas nagon gang"}, NodeProp{key: "wrap", content: "1"}, NodeProp{key: "fill", content: "1"}], children: []}]}
+    st_a = layout(stdoc, p_th, face)
+    nap_st = sleep_ms(40)
+    st_b = layout(stdoc, p_th, face)
+    check("the same document lays out the same twice", to_whole(at(st_a, 0).rect.high), to_whole(at(st_b, 0).rect.high))
+    check("and its child does too", to_whole(at(st_a, 1).rect.high), to_whole(at(st_b, 1).rect.high))
+    # The same, for a flow - the one arrangement whose height depends on
+    # the width it is given, and so the one most likely to answer twice.
+    fw = Node{role: role("blk"), props: [NodeProp{key: "w", content: "70"}, NodeProp{key: "h", content: "20"}], children: []}
+    fwrow = Node{role: role("bar"), props: [NodeProp{key: "w", content: "160"}, NodeProp{key: "layout", content: "flow"}, NodeProp{key: "gap", content: "6"}, NodeProp{key: "do", content: "flow"}], children: [1, 2, 3]}
+    fwdoc = SemanticDocument{root: 0, nodes: [fwrow, fw, fw, fw]}
+    fw_a = layout(fwdoc, p_th, face)
+    nap_fw = sleep_ms(40)
+    fw_b = layout(fwdoc, p_th, face)
+    check("a flow lays out the same twice", to_whole(at(fw_a, 0).rect.high), to_whole(at(fw_b, 0).rect.high))
+    # A padded panel holding a flow that wraps, inside a fixed column -
+    # the exact shape of a settings card. Its bottom has to be below the
+    # last thing in it, or the last thing hangs out of the card.
+    pz = Node{role: role("blk"), props: [NodeProp{key: "w", content: "70"}, NodeProp{key: "h", content: "20"}], children: []}
+    pflow = Node{role: role("bar"), props: [NodeProp{key: "layout", content: "flow"}, NodeProp{key: "gap", content: "6"}, NodeProp{key: "fill", content: "1"}], children: [1, 2, 3, 4]}
+    ptail = Node{role: role("blk"), props: [NodeProp{key: "w", content: "60"}, NodeProp{key: "h", content: "14"}], children: []}
+    ppanel2 = Node{role: role("bar"), props: [NodeProp{key: "pad", content: "16"}, NodeProp{key: "gap", content: "12"}, NodeProp{key: "fill", content: "1"}, NodeProp{key: "layout", content: "column"}], children: [5, 6]}
+    pcol2 = Node{role: role("bar"), props: [NodeProp{key: "w", content: "220"}, NodeProp{key: "layout", content: "column"}], children: [7]}
+    pdoc3 = SemanticDocument{root: 0, nodes: [pcol2, pz, pz, pz, pz, pflow, ptail, ppanel2]}
+    pm3 = layout(pdoc3, p_th, face)
+    panel_low = to_whole(at(pm3, 7).rect.y + at(pm3, 7).rect.high)
+    tail_low = to_whole(at(pm3, 6).rect.y + at(pm3, 6).rect.high)
+    check_true("the card reaches below the last thing in it", panel_low >= tail_low)
+    # A scrolling box asks for nothing. Asking for the height of
+    # everything in it made its parent believe nothing would fit and
+    # squeeze the entire screen to make room.
+    tall_kid = Node{role: role("blk"), props: [NodeProp{key: "w", content: "50"}, NodeProp{key: "h", content: "900"}], children: []}
+    roller = Node{role: role("bar"), props: [NodeProp{key: "clip", content: "1"}, NodeProp{key: "scrollbar", content: "1"}, NodeProp{key: "scroll_y", content: "0"}, NodeProp{key: "grow", content: "1"}, NodeProp{key: "fill", content: "1"}], children: [1]}
+    hdr = Node{role: role("blk"), props: [NodeProp{key: "w", content: "50"}, NodeProp{key: "h", content: "40"}], children: []}
+    rpage = Node{role: role("bar"), props: [NodeProp{key: "w", content: "200"}, NodeProp{key: "h", content: "300"}, NodeProp{key: "layout", content: "column"}], children: [3, 2]}
+    rm2 = layout_in(SemanticDocument{root: 0, nodes: [rpage, tall_kid, roller, hdr]}, p_th, face, Rect{x: 0, y: 0, wide: 200, high: 300})
+    check("the header keeps its whole height", 40, to_whole(at(rm2, 3).rect.high))
+    check("and the scrolling box takes what is left", 260, to_whole(at(rm2, 2).rect.high))
+    # Room a thing carries with it wherever it is put.
+    mkid = Node{role: role("blk"), props: [NodeProp{key: "w", content: "40"}, NodeProp{key: "h", content: "20"}, NodeProp{key: "margin", content: "6"}], children: []}
+    mrow = Node{role: role("bar"), props: [NodeProp{key: "layout", content: "row"}], children: [1, 2]}
+    mm = layout(SemanticDocument{root: 0, nodes: [mrow, mkid, mkid]}, p_th, face)
+    check("a margin keeps the box its own size", 40, to_whole(at(mm, 1).rect.wide))
+    check("and pushes the next one clear of it", 58, to_whole(at(mm, 2).rect.x) - 16)
+    # One side worked out from the other.
+    abox = Node{role: role("blk"), props: [NodeProp{key: "w", content: "160"}, NodeProp{key: "aspect", content: "16:9"}], children: []}
+    am2 = layout(SemanticDocument{root: 0, nodes: [abox]}, p_th, face)
+    check("sixteen by nine at a hundred and sixty", 90, to_whole(at(am2, 0).rect.high))
+    # Here, visible, and not taking part.
+    offbox = Node{role: role("blk"), props: [NodeProp{key: "do", content: "no"}, NodeProp{key: "off", content: "1"}, NodeProp{key: "w", content: "60"}, NodeProp{key: "h", content: "30"}], children: []}
+    check_text("a disabled control does not answer", "", pick_spoken(SemanticDocument{root: 0, nodes: [offbox]}, p_th, face, Rect{x: 0, y: 0, wide: 60, high: 30}, 30, 15))
+    # A colour inside a line, without a second node and without a Rich
+    # Text control. It measures as what it READS as, so wrapping, the
+    # caret and everything else that walks text are untouched.
+    check_text("the markers are not part of the words", "Vanlig gul text", plain_of("Vanlig [#e8a33c]gul[] text"))
+    check("and so the line is the width of the words", to_whole(text_size("Vanlig gul text", 13, face).wide), to_whole(text_size("Vanlig [#e8a33c]gul[] text", 13, face).wide))
+    parts = runs_of("Vanlig [#e8a33c]gul[] text")
+    check("three pieces", 6, length(parts))
+    check_text("the middle one carries its ink", "#e8a33c", at(parts, 2))
+    check_text("and the last goes back to the node s own", "", at(parts, 4))
+    richnode = Node{role: role("bar"), props: [NodeProp{key: "ink", content: "#ffffffff"}, NodeProp{key: "text", content: "Vanlig [#e8a33c]gul[] text"}, NodeProp{key: "w", content: "300"}, NodeProp{key: "h", content: "20"}], children: []}
+    check("a line of three inks is three draws plus its box", 4, cmd_count(resolve(SemanticDocument{root: 0, nodes: [richnode]}, p_th, face)))
     check("and a fraction cannot exceed the whole", 200, to_whole(at(placed_o, 1).rect.wide))
 
     passed = chk_pass()
