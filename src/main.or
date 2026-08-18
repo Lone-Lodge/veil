@@ -22,6 +22,7 @@ use veil_theme
 use ori_display
 use veil_interaction
 use veil_measure
+use veil_edit
 use veil_resolver
 use veil_web
 use veil_theme_web
@@ -29,6 +30,15 @@ use veil_inventory
 use veil_showcase
 use os
 use typeface
+
+# How many of these lines are wider than they were allowed to be. 0 is the
+# only acceptable answer; anything else means the greedy fit is broken.
+define over_wide(lines: [text], size: int, face: Font, max_w: int) -> int:
+    edit bad = 0
+    loop l in lines:
+        if text_size(l, size, face).wide > max_w:
+            bad = bad + 1
+    bad
 
 # ---- the harness ----
 # Counters live in slots: the process-global store, which is also how the
@@ -213,8 +223,8 @@ define main() -> int:
     # back to the resting rule. Without this the document has to pick its
     # look by role name (item, item_lit, item_on) - which is the one thing
     # the document is not supposed to know.
-    st_rest = StyleRule{role_name: "item", padding: 4, gap: 0, fg_colour: "#aaaaaa", bg_colour: "", direction: "row", radius: 0, size: 0, border: 0, border_colour: ""}
-    st_lit = StyleRule{role_name: "item:lit", padding: 4, gap: 0, fg_colour: "#ffffff", bg_colour: "#242424", direction: "row", radius: 0, size: 0, border: 0, border_colour: ""}
+    st_rest = StyleRule{role_name: "item", padding: 4, gap: 0, fg_colour: "#aaaaaa", bg_colour: "", direction: "row", radius: 0, size: 0, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}
+    st_lit = StyleRule{role_name: "item:lit", padding: 4, gap: 0, fg_colour: "#ffffff", bg_colour: "#242424", direction: "row", radius: 0, size: 0, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}
     st_theme = Theme{rules: [st_rest, st_lit]}
     check_text("no state uses the resting rule", "#aaaaaa", lookup_state(st_theme, role("item"), "").fg_colour)
     check_text("a state picks its own rule", "#ffffff", lookup_state(st_theme, role("item"), "lit").fg_colour)
@@ -228,7 +238,7 @@ define main() -> int:
     # Before this a document had to say `radius: 7` and `size: 12` itself,
     # which is a document saying how a thing LOOKS. A node prop still wins
     # where one thing genuinely differs from its kind.
-    big = StyleRule{role_name: "heading", padding: 0, gap: 0, fg_colour: "#fff", bg_colour: "", direction: "", radius: 0, size: 26, border: 0, border_colour: ""}
+    big = StyleRule{role_name: "heading", padding: 0, gap: 0, fg_colour: "#fff", bg_colour: "", direction: "", radius: 0, size: 26, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}
     bt = Theme{rules: [big]}
     h_theme = Node{role: role("heading"), props: [NodeProp{key: "text", content: "Hi"}], children: []}
     h_own = Node{role: role("heading"), props: [NodeProp{key: "text", content: "Hi"}, NodeProp{key: "size", content: "13"}], children: []}
@@ -245,7 +255,7 @@ define main() -> int:
     kid = Node{role: role("button"), props: [NodeProp{key: "label", content: "Go"}, NodeProp{key: "do", content: "go"}], children: []}
     root = Node{role: role("panel"), props: [NodeProp{key: "w", content: "300"}, NodeProp{key: "h", content: "200"}], children: [0]}
     last = SemanticDocument{root: 1, nodes: [kid, root]}
-    lt = Theme{rules: [StyleRule{role_name: "panel", padding: 10, gap: 0, fg_colour: "", bg_colour: "#111111", direction: "column", radius: 0, size: 0, border: 0, border_colour: ""}, StyleRule{role_name: "button", padding: 6, gap: 0, fg_colour: "#ffffff", bg_colour: "#0ea5e9", direction: "row", radius: 0, size: 13, border: 0, border_colour: ""}]}
+    lt = Theme{rules: [StyleRule{role_name: "panel", padding: 10, gap: 0, fg_colour: "", bg_colour: "#111111", direction: "column", radius: 0, size: 0, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}, StyleRule{role_name: "button", padding: 6, gap: 0, fg_colour: "#ffffff", bg_colour: "#0ea5e9", direction: "row", radius: 0, size: 13, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}]}
     lbox = Rect{x: 0, y: 0, wide: 300, high: 200}
     check_text("the child answers, not the root that follows it", "go", pick_spoken(last, lt, face, lbox, 20, 20))
     check_text("a point outside the child is the root's", "\{mute\}", pick_spoken(last, lt, face, lbox, 20, 150))
@@ -258,20 +268,209 @@ define main() -> int:
     inner = Node{role: role("panel"), props: [NodeProp{key: "w", content: "80"}, NodeProp{key: "h", content: "20"}], children: []}
     btn2 = Node{role: role("button"), props: [NodeProp{key: "do", content: "go"}, NodeProp{key: "w", content: "100"}, NodeProp{key: "h", content: "40"}], children: [0]}
     bd = SemanticDocument{root: 1, nodes: [inner, btn2]}
-    bt2 = Theme{rules: [StyleRule{role_name: "button", padding: 0, gap: 0, fg_colour: "", bg_colour: "#0ea5e9", direction: "column", radius: 0, size: 0, border: 0, border_colour: ""}, StyleRule{role_name: "panel", padding: 0, gap: 0, fg_colour: "", bg_colour: "#111111", direction: "column", radius: 0, size: 0, border: 0, border_colour: ""}]}
+    bt2 = Theme{rules: [StyleRule{role_name: "button", padding: 0, gap: 0, fg_colour: "", bg_colour: "#0ea5e9", direction: "column", radius: 0, size: 0, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}, StyleRule{role_name: "panel", padding: 0, gap: 0, fg_colour: "", bg_colour: "#111111", direction: "column", radius: 0, size: 0, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}]}
     bbox = Rect{x: 0, y: 0, wide: 200, high: 100}
     check_text("clicking the middle of a button hits the button", "go", pick_spoken(bd, bt2, face, bbox, 40, 10))
 
     section("borders")
     # A bordered box is drawn twice - the edge full size, the fill inset -
     # so a rim needs no nested node in the document. It used to.
-    plain = StyleRule{role_name: "card", padding: 0, gap: 0, fg_colour: "", bg_colour: "#222222", direction: "column", radius: 6, size: 0, border: 0, border_colour: ""}
-    rimmed = StyleRule{role_name: "input", padding: 0, gap: 0, fg_colour: "", bg_colour: "#222222", direction: "column", radius: 6, size: 0, border: 1, border_colour: "#e8813c"}
+    plain = StyleRule{role_name: "card", padding: 0, gap: 0, fg_colour: "", bg_colour: "#222222", direction: "column", radius: 6, size: 0, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}
+    rimmed = StyleRule{role_name: "input", padding: 0, gap: 0, fg_colour: "", bg_colour: "#222222", direction: "column", radius: 6, size: 0, border: 1, border_colour: "#e8813c", shadow: 0, shadow_colour: ""}
     bth = Theme{rules: [plain, rimmed]}
     bnode = Node{role: role("card"), props: [NodeProp{key: "w", content: "60"}, NodeProp{key: "h", content: "20"}], children: []}
     rnode = Node{role: role("input"), props: [NodeProp{key: "w", content: "60"}, NodeProp{key: "h", content: "20"}], children: []}
     check("a plain box is one command", 1, cmd_count(resolve(SemanticDocument{root: 0, nodes: [bnode]}, bth, face)))
     check("a bordered box is two", 2, cmd_count(resolve(SemanticDocument{root: 0, nodes: [rnode]}, bth, face)))
+
+    section("shadows")
+    lifted = StyleRule{role_name: "sheet", padding: 0, gap: 0, fg_colour: "", bg_colour: "#222222", direction: "column", radius: 8, size: 0, border: 0, border_colour: "", shadow: 12, shadow_colour: "#00000060"}
+    flat = StyleRule{role_name: "plain", padding: 0, gap: 0, fg_colour: "", bg_colour: "#222222", direction: "column", radius: 8, size: 0, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}
+    sth = Theme{rules: [lifted, flat]}
+    snode = Node{role: role("sheet"), props: [NodeProp{key: "w", content: "60"}, NodeProp{key: "h", content: "20"}], children: []}
+    fnode = Node{role: role("plain"), props: [NodeProp{key: "w", content: "60"}, NodeProp{key: "h", content: "20"}], children: []}
+    check("a flat box is one command", 1, cmd_count(resolve(SemanticDocument{root: 0, nodes: [fnode]}, sth, face)))
+    check("a lifted box draws its shadow first", 2, cmd_count(resolve(SemanticDocument{root: 0, nodes: [snode]}, sth, face)))
+
+    section("text wrapping")
+    # Without this a paragraph runs off the edge, and the only way round it
+    # was for the host to pre-break its own text - which Lehabah did, in
+    # Python, before the words ever reached the UI.
+    long_line = "the quick brown fox jumps over the lazy dog"
+    one = wrap_text(long_line, 13, face, 10000)
+    many = wrap_text(long_line, 13, face, 120)
+    check("room for it all is one line", 1, length(one))
+    check("a narrow box breaks it up", 3, length(many))
+    check("every line fits the box", 0, over_wide(many, 13, face, 120))
+    lh = line_high(13, face)
+    check("the block is as tall as its lines", 3 * lh, wrapped_high(long_line, 13, face, 120))
+    wnode = Node{role: role("text"), props: [NodeProp{key: "body", content: long_line}, NodeProp{key: "w", content: "120"}, NodeProp{key: "wrap", content: "1"}], children: []}
+    wt = Theme{rules: [StyleRule{role_name: "text", padding: 0, gap: 0, fg_colour: "#fff", bg_colour: "", direction: "column", radius: 0, size: 13, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}]}
+    wdoc = SemanticDocument{root: 0, nodes: [wnode]}
+    check("a wrapping node measures its full height", 3 * lh, measure(wdoc, wt, face, 0).h)
+    check("and paints one command per line", 3, cmd_count(resolve(wdoc, wt, face)))
+
+    section("clip and scroll")
+    # Content longer than its box used to shove its neighbours out of the
+    # way. A clipping node cuts it instead, and `scroll_x: end` keeps the
+    # far edge in view - which is what a single-line input needs.
+    wide_kid = Node{role: role("text"), props: [NodeProp{key: "text", content: "x"}, NodeProp{key: "w", content: "400"}, NodeProp{key: "h", content: "20"}], children: []}
+    mark_kid = Node{role: role("text"), props: [NodeProp{key: "text", content: "|"}, NodeProp{key: "w", content: "4"}, NodeProp{key: "h", content: "20"}], children: []}
+    clipbox = Node{role: role("panel"), props: [NodeProp{key: "w", content: "100"}, NodeProp{key: "h", content: "20"}, NodeProp{key: "layout", content: "row"}, NodeProp{key: "clip", content: "1"}, NodeProp{key: "scroll_x", content: "end"}], children: [0, 1]}
+    cdoc = SemanticDocument{root: 2, nodes: [wide_kid, mark_kid, clipbox]}
+    ct = Theme{rules: [StyleRule{role_name: "panel", padding: 0, gap: 0, fg_colour: "", bg_colour: "#111", direction: "row", radius: 0, size: 13, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}, StyleRule{role_name: "text", padding: 0, gap: 0, fg_colour: "#fff", bg_colour: "", direction: "row", radius: 0, size: 13, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}]}
+    cbox = Rect{x: 0, y: 0, wide: 200, high: 100}
+    placed_c = layout_in(cdoc, ct, face, cbox)
+    # layout_in places the ROOT in the box it is given, so the panel is the
+    # 200 the host offered rather than its own w. 404 of content overflows
+    # by 204, and the mark that sits at the end is pulled back to 196 -
+    # inside the box, where before it sat 204px past the edge.
+    check("the tail is pulled into view", 196, to_whole(at(placed_c, 1).rect.x))
+    check("and the box itself has not moved", 0, to_whole(at(placed_c, 2).rect.x))
+    check("a clipping node emits its scissor", 5, cmd_count(resolve_in(cdoc, ct, face, cbox)))
+
+    section("layers")
+    # A dialog belongs to the thing that opened it, not to the top of the
+    # document. Without layers it paints where it happens to sit in the
+    # tree and vanishes under its neighbours - and worse, the page under
+    # it keeps answering the clicks.
+    under = Node{role: role("panel"), props: [NodeProp{key: "w", content: "200"}, NodeProp{key: "h", content: "100"}, NodeProp{key: "do", content: "page"}], children: []}
+    over = Node{role: role("panel"), props: [NodeProp{key: "w", content: "200"}, NodeProp{key: "h", content: "100"}, NodeProp{key: "do", content: "sheet"}, NodeProp{key: "layer", content: "1"}], children: []}
+    stack = Node{role: role("panel"), props: [NodeProp{key: "w", content: "200"}, NodeProp{key: "h", content: "100"}, NodeProp{key: "layout", content: "stack"}], children: [0, 1]}
+    ldoc = SemanticDocument{root: 2, nodes: [under, over, stack]}
+    lay_t = Theme{rules: [StyleRule{role_name: "panel", padding: 0, gap: 0, fg_colour: "", bg_colour: "#111", direction: "column", radius: 0, size: 13, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}]}
+    lay_box = Rect{x: 0, y: 0, wide: 200, high: 100}
+    check_text("the raised node answers the click", "sheet", pick_spoken(ldoc, lay_t, face, lay_box, 10, 10))
+    # Everything still paints - layering is about ORDER, not about hiding.
+    check("nothing is dropped", 3, cmd_count(resolve_in(ldoc, lay_t, face, lay_box)))
+    placed_l = layout_in(ldoc, lay_t, face, lay_box)
+    check("a stack puts both children in one place", to_whole(at(placed_l, 0).rect.y), to_whole(at(placed_l, 1).rect.y))
+
+    section("shrinking")
+    # Flow with no shrink runs off the edge: two 200-wide panels in a 200
+    # box stayed 200 wide each and the second left the window. They give up
+    # the same proportion now.
+    big1 = Node{role: role("panel"), props: [NodeProp{key: "w", content: "200"}, NodeProp{key: "h", content: "20"}], children: []}
+    big2 = Node{role: role("panel"), props: [NodeProp{key: "w", content: "200"}, NodeProp{key: "h", content: "20"}], children: []}
+    tight = Node{role: role("panel"), props: [NodeProp{key: "layout", content: "row"}], children: [0, 1]}
+    sdoc = SemanticDocument{root: 2, nodes: [big1, big2, tight]}
+    s_th = Theme{rules: [StyleRule{role_name: "panel", padding: 0, gap: 0, fg_colour: "", bg_colour: "#111", direction: "row", radius: 0, size: 13, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}]}
+    s_box = Rect{x: 0, y: 0, wide: 200, high: 20}
+    placed_s = layout_in(sdoc, s_th, face, s_box)
+    check("each gives up half", 100, to_whole(at(placed_s, 0).rect.wide))
+    check("and the second starts where the first ends", 100, to_whole(at(placed_s, 1).rect.x))
+    # A clipping node keeps its children whole - it cuts instead.
+    kept = Node{role: role("panel"), props: [NodeProp{key: "layout", content: "row"}, NodeProp{key: "clip", content: "1"}], children: [0, 1]}
+    kdoc = SemanticDocument{root: 2, nodes: [big1, big2, kept]}
+    placed_k = layout_in(kdoc, s_th, face, s_box)
+    check("a clipping row does not squeeze", 200, to_whole(at(placed_k, 0).rect.wide))
+
+    section("editing a line")
+    # Both apps that needed a field wrote this twice and neither could put
+    # the caret anywhere but at the end. The caret is a byte offset that
+    # only ever stands on a character boundary.
+    e0 = edit_new("")
+    e1 = edit_type(edit_type(edit_type(e0, 104), 101), 106)
+    check_text("typing builds the line", "hej", e1.content)
+    check("and the caret follows it", 3, e1.caret)
+    e2 = edit_left(edit_left(e1))
+    check("left steps one character", 1, e2.caret)
+    e3 = edit_type(e2, 97)
+    check_text("typing inserts where the caret is", "haej", e3.content)
+    # å is two bytes: one press has to move over both.
+    e4 = edit_type(edit_new(""), 229)
+    check("a two-byte letter is one step", 2, e4.caret)
+    check("and left goes back over both", 0, edit_left(e4).caret)
+    check_text("erase takes the whole letter", "", edit_erase(e4).content)
+    e5 = edit_home(e3)
+    check_text("home puts everything after the caret", "haej", edit_after(e5))
+    check_text("and nothing before it", "", edit_before(e5))
+    check_text("delete takes the one to the right", "aej", edit_delete(e5).content)
+
+    section("selecting text")
+    # A field you can type in but not select from is a field you cannot
+    # copy out of, and that is the first thing anyone tries.
+    w0 = edit_new("hej varld")
+    check("nothing is selected to begin with", 0, if edit_has_selection(w0) then 1 else 0)
+    w1 = edit_all(w0)
+    check_text("select all takes the lot", "hej varld", edit_selected(w1))
+    check_text("and typing over it replaces it", "x", edit_type(w1, 120).content)
+    check_text("as does pasting", "nytt", edit_paste(w1, "nytt").content)
+    check_text("and backspace just removes it", "", edit_erase(w1).content)
+    # Drag from 4 to 9: "varld".
+    w2 = edit_reach(edit_put(w0, 4), 9)
+    check_text("a drag selects what it crossed", "varld", edit_selected(w2))
+    check_text("with the rest still either side", "hej ", edit_left_of(w2))
+    check_text("", "", edit_right_of(w2))
+    # A double click in the middle of the first word takes the word.
+    w3 = edit_word(edit_put(w0, 1))
+    check_text("a word is what a double click gets", "hej", edit_selected(w3))
+    # Shift-arrow: move, keep the anchor.
+    w4 = edit_hold(edit_put(w0, 0), edit_right(edit_put(w0, 0)))
+    check_text("shift-arrow keeps the anchor", "h", edit_selected(w4))
+    # A click maps to the nearest character boundary, never mid-letter.
+    check("a click at the far left is offset 0", 0, caret_at("hej varld", 13, face, 0))
+    check("a click past the end is the end", 9, caret_at("hej varld", 13, face, 9999))
+
+    section("grid")
+    # Flow only knows about one axis at a time, so a table cannot line its
+    # columns up down the page. A grid can.
+    edit cells = []
+    loop _i in 0..<6:
+        cells = append(cells, Node{role: role("cell"), props: [NodeProp{key: "w", content: "40"}, NodeProp{key: "h", content: "20"}], children: []})
+    grid_node = Node{role: role("grid"), props: [NodeProp{key: "layout", content: "grid"}, NodeProp{key: "cols", content: "3"}, NodeProp{key: "gap", content: "10"}], children: [0, 1, 2, 3, 4, 5]}
+    gdoc = SemanticDocument{root: 6, nodes: append(cells, grid_node)}
+    g_th = Theme{rules: [StyleRule{role_name: "grid", padding: 0, gap: 10, fg_colour: "", bg_colour: "", direction: "column", radius: 0, size: 13, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}, StyleRule{role_name: "cell", padding: 0, gap: 0, fg_colour: "", bg_colour: "#333", direction: "column", radius: 0, size: 13, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}]}
+    g_box = Rect{x: 0, y: 0, wide: 140, high: 100}
+    gplaced = layout_in(gdoc, g_th, face, g_box)
+    check("six in three columns is two rows tall", 50, measure(gdoc, g_th, face, 6).h)
+    check("the fourth wraps to the second row", 0, to_whole(at(gplaced, 3).rect.x))
+    check("and sits a row down", 30, to_whole(at(gplaced, 3).rect.y))
+    check("the third is in the last column", 100, to_whole(at(gplaced, 2).rect.x))
+    check("columns share the width evenly", 40, to_whole(at(gplaced, 0).rect.wide))
+
+    section("scrollbar")
+    # Scroll that leaves no mark is scroll nobody finds. The bar comes out
+    # of the same rects the scrolling uses, so it can never disagree with
+    # where the list actually is.
+    edit rows = []
+    loop _i in 0..<10:
+        rows = append(rows, Node{role: role("row"), props: [NodeProp{key: "h", content: "20"}, NodeProp{key: "fill", content: "1"}], children: []})
+    short = Node{role: role("well"), props: [NodeProp{key: "h", content: "60"}, NodeProp{key: "clip", content: "1"}, NodeProp{key: "scrollbar", content: "1"}], children: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]}
+    tall_box = Node{role: role("well"), props: [NodeProp{key: "h", content: "400"}, NodeProp{key: "clip", content: "1"}, NodeProp{key: "scrollbar", content: "1"}], children: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]}
+    b_th = Theme{rules: [StyleRule{role_name: "well", padding: 0, gap: 0, fg_colour: "#888888", bg_colour: "#111", direction: "column", radius: 0, size: 13, border: 1, border_colour: "#333333", shadow: 0, shadow_colour: ""}, StyleRule{role_name: "row", padding: 0, gap: 0, fg_colour: "", bg_colour: "#222", direction: "row", radius: 0, size: 13, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}]}
+    # A box with more in it than fits: two clip commands, the boxes, and
+    # the two the bar adds.
+    bar_on = cmd_count(resolve_in(SemanticDocument{root: 10, nodes: append(rows, short)}, b_th, face, Rect{x: 0, y: 0, wide: 100, high: 60}))
+    bar_off = cmd_count(resolve_in(SemanticDocument{root: 10, nodes: append(rows, tall_box)}, b_th, face, Rect{x: 0, y: 0, wide: 100, high: 400}))
+    check("a full box draws a track and a thumb", 2, bar_on - bar_off)
+
+    section("sizes as a share")
+    # A document should say what fraction of the room it wants, not work
+    # the pixels out itself. A progress fill given `part * 3` burst its own
+    # 220-wide track the moment part went past 73.
+    tr = Node{role: role("bar"), props: [NodeProp{key: "w", content: "200"}, NodeProp{key: "h", content: "10"}, NodeProp{key: "layout", content: "row"}], children: [1]}
+    fl = Node{role: role("fill"), props: [NodeProp{key: "w", content: "40%"}, NodeProp{key: "h", content: "10"}], children: []}
+    pdoc = SemanticDocument{root: 0, nodes: [tr, fl]}
+    p_th = Theme{rules: [StyleRule{role_name: "bar", padding: 0, gap: 0, fg_colour: "", bg_colour: "#222", direction: "row", radius: 0, size: 13, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}, StyleRule{role_name: "fill", padding: 0, gap: 0, fg_colour: "", bg_colour: "#e8a33c", direction: "row", radius: 0, size: 13, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}]}
+    placed_p = layout_in(pdoc, p_th, face, Rect{x: 0, y: 0, wide: 200, high: 10})
+    check("forty per cent of two hundred is eighty", 80, to_whole(at(placed_p, 1).rect.wide))
+    over_fl = Node{role: role("fill"), props: [NodeProp{key: "w", content: "180%"}, NodeProp{key: "h", content: "10"}], children: []}
+    placed_o = layout_in(SemanticDocument{root: 0, nodes: [tr, over_fl]}, p_th, face, Rect{x: 0, y: 0, wide: 200, high: 10})
+    # A Swedish letter is two bytes and one character. Measured as bytes it
+    # came out as two glyphs, so the width was wrong and the caret walk -
+    # which always read characters - disagreed with it.
+    aa_w = to_whole(text_size("aa", 16, face).wide)
+    check("an a-ring is one character wide, not two", to_whole(text_size("å", 16, face).wide) < aa_w, true)
+    check("and the caret agrees with the measurer", bytes_count(bytes_of("å")), caret_at("å", 16, face, 1000))
+    # A share and a `grow` in the same row were each handed a piece of
+    # the same space, because the share was settled after the leftover
+    # had already been counted, so the row came out wider than its box.
+    grow_fl = Node{role: role("fill"), props: [NodeProp{key: "grow", content: "1"}, NodeProp{key: "h", content: "10"}], children: []}
+    tr2 = Node{role: role("bar"), props: [NodeProp{key: "w", content: "200"}, NodeProp{key: "h", content: "10"}, NodeProp{key: "layout", content: "row"}], children: [1, 2]}
+    prow = layout_in(SemanticDocument{root: 0, nodes: [tr2, fl, grow_fl]}, p_th, face, Rect{x: 0, y: 0, wide: 200, high: 10})
+    check("a share and a grow share ONE row", 200, to_whole(at(prow, 1).rect.wide) + to_whole(at(prow, 2).rect.wide))
+    check("and a fraction cannot exceed the whole", 200, to_whole(at(placed_o, 1).rect.wide))
 
     passed = chk_pass()
     failed = chk_fail()

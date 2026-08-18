@@ -4,3 +4,4 @@ description = "Veil — SemanticDocument: the IR a UI declares"
 
 [orbs]
 veil_role = "path:../veil_role"
+text = "path:../../../orion/orbs/text"

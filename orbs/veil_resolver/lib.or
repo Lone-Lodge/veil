@@ -60,6 +60,90 @@ define node_border_colour(node: Node, style: StyleRule) -> text:
     c = prop_val(node, "edge")
     if length(c) > 0 then c else style.border_colour
 
+# `wrap: 1` lets a run of text break across lines instead of running off
+# the edge. Off by default: a label that silently became two lines tall
+# would push everything under it down without saying why.
+# The width a child has to work with: this node's own inner width, else
+# what came down from above, else nothing to promise.
+define inner_room(own: int, avail: int, pad: int) -> int:
+    if own > 0:
+        return own - pad * 2
+    if avail > 0:
+        return avail - pad * 2
+    0
+
+# A wrapping leaf claims the whole width it was offered - that is what
+# wrapping means. One that does not wrap is as wide as its line.
+define leaf_wide(own: int, wrapped: truth, box: int, line: int) -> int:
+    if own > 0:
+        return own
+    if wrapped:
+        return box
+    line
+
+# `clip: 1` cuts this node's children to its box. Anything longer than the
+# box - a list, a line of typing - stops shoving its neighbours aside and
+# is simply not drawn past the edge.
+# `layer: N` lifts a node and its subtree above everything with a lower
+# layer, wherever it sits in the tree. A dialog belongs to the thing that
+# opened it, not to the top of the document, and without this it would be
+# painted where it happens to live and disappear under its neighbours.
+#
+# Paint walks the tree once per layer, low to high. Picking walks it the
+# other way, so the raised thing answers first - a dialog that draws over
+# the page but lets its clicks through would be worse than no dialog.
+define node_layer(node: Node) -> int:
+    prop_int(node, "layer", 0)
+
+define node_clips(node: Node) -> truth:
+    prop_val(node, "clip") == "1"
+
+# How far the contents are shifted, in pixels. Scrolling IS clipping plus an
+# offset; keeping them one idea means a scrolled thing is always a clipped
+# thing and cannot be forgotten.
+# A pixel count, or the word `end`: keep the far edge of the contents
+# against the far edge of the box. That is what a single-line input wants -
+# you type, and what you just typed stays visible - and it needs no help
+# from the app, which would otherwise have to measure the text itself.
+define node_scroll_x(node: Node) -> int:
+    prop_int(node, "scroll_x", 0)
+
+define scrolls_to_end(node: Node) -> truth:
+    prop_val(node, "scroll_x") == "end"
+
+define node_scroll_y(node: Node) -> int:
+    prop_int(node, "scroll_y", 0)
+
+# `scrollbar: 1` on a clipping node draws the track and thumb itself, out
+# of the same rects the scrolling uses. Scroll that leaves no mark is
+# scroll nobody finds: there is nothing on screen to say the list goes on,
+# or how far down it you are.
+define node_bars(node: Node) -> truth:
+    prop_val(node, "scrollbar") == "1"
+
+# How tall the contents are. The children have already been SHIFTED up by
+# the scroll when they were placed, so their measured bottom is where they
+# sit now, not how much there is. Adding the scroll back gives the real
+# extent - without it the content appeared to shrink as you scrolled, and
+# the thumb shot off the end of its track.
+define content_below(doc: SemanticDocument, measured: [Measured], node_id: int, box: Rect) -> int:
+    node = at(doc.nodes, node_id)
+    edit low = to_whole(box.y)
+    loop k in node.children:
+        if node_shown(at(doc.nodes, k)):
+            r = at(measured, k).rect
+            bottom = to_whole(r.y + r.high)
+            if bottom > low:
+                low = bottom
+    low - to_whole(box.y) + node_scroll_y(node)
+
+define node_wraps(node: Node) -> truth:
+    prop_val(node, "wrap") == "1"
+
+define node_shadow_colour(node: Node, style: StyleRule) -> text:
+    c = prop_val(node, "shade")
+    if length(c) > 0 then c else style.shadow_colour
+
 define inset(r: Rect, by: int) -> Rect:
     d = to_real(by)
     Rect{x: r.x + d, y: r.y + d, wide: r.wide - d * 2.0, high: r.high - d * 2.0}
@@ -85,6 +169,18 @@ define parse_int_v(t: text) -> int:
             acc = acc * 10 + (c - 48)
     acc
 
+# A size given as a share of the parent: `w: "40%"`. The document says what
+# fraction of the room it wants and the layout works out the pixels, which
+# is the only way a bar can be certain never to burst its own track. -1
+# when the value is not a percentage.
+define prop_percent(node: Node, key: text) -> int:
+    v = prop_val(node, key)
+    b = bytes_of(v)
+    n = bytes_count(b)
+    if n < 2 or byte_at(b, n - 1) != 37:
+        return 0 - 1
+    parse_int_v(v)
+
 define prop_int(node: Node, key: text, dflt: int) -> int:
     v = prop_val(node, key)
     if length(v) == 0 then dflt else parse_int_v(v)
@@ -94,6 +190,16 @@ define prop_int(node: Node, key: text, dflt: int) -> int:
 # what a node looks like.
 define style_of(theme: Theme, node: Node) -> StyleRule:
     lookup_state(theme, node.role, prop_val(node, "state"))
+
+# Every node's rule is worked out once, in measure_all, and read from an
+# array after that. Measuring, placing and painting each used to look it
+# up for themselves, so a screen of 151 nodes scanned the theme 453 times
+# to arrive at 151 answers. An empty array means there is none yet - the
+# one-off measure_in path, which has no pass to hang a cache on.
+define ready_style(theme: Theme, node: Node, node_id: int, styles: [StyleRule]) -> StyleRule:
+    if length(styles) == 0:
+        return style_of(theme, node)
+    at(styles, node_id)
 
 define is_row(style: StyleRule) -> truth:
     style.direction == "row"
@@ -111,6 +217,38 @@ define node_gap(node: Node, style: StyleRule) -> int:
 define node_row(node: Node, style: StyleRule) -> truth:
     l = prop_val(node, "layout")
     if length(l) > 0 then l == "row" or l == "horizontal" else style.direction == "row"
+
+# `layout: stack` puts every child in the SAME box instead of in a line.
+# Without it two things cannot occupy one space, and a dialog has nowhere
+# to be: flow would put it politely below the page it is meant to cover.
+# Stack is what `layer` needs to be useful, and layer is what makes stack
+# come out in the right order.
+define node_stacks(node: Node) -> truth:
+    prop_val(node, "layout") == "stack"
+
+# `layout: grid` with `cols: N` lays children out in N equal columns,
+# wrapping to a new row every N. A table, a calendar, a palette of swatches
+# - anything where the columns line up down the page, which flow cannot do
+# because flow only knows about one axis at a time.
+define node_grid(node: Node) -> int:
+    if prop_val(node, "layout") == "grid" then prop_int(node, "cols", 1) else 0
+
+# How tall a grid of `n` children in `cols` columns is, given the tallest
+# child. Rows are uniform: a grid whose rows each found their own height
+# would not line up across, which is the whole reason to use one.
+# Every cell in a grid is as tall as the tallest child, so the rows line up.
+define tallest_kid(doc: SemanticDocument, theme: Theme, face: Font, node: Node, room: int) -> int:
+    edit tall = 0
+    loop k in node.children:
+        if node_shown(at(doc.nodes, k)):
+            h = measure_in(doc, theme, face, k, room).h
+            if h > tall:
+                tall = h
+    tall
+
+define grid_high(n: int, cols: int, cell_h: int, gap: int) -> int:
+    rows = (n + cols - 1) // cols
+    if rows <= 0 then 0 else rows * cell_h + (rows - 1) * gap
 
 # Box fill colour: `color:` prop (Atlas, already token-resolved to a literal by
 # the adapter) else the theme's bg. Label colour: `ink:` prop else theme fg.
@@ -130,46 +268,121 @@ type Size2: w: int, h: int
 # children along the main axis (+ gaps) and the max along the cross axis, + its
 # own padding. Explicit `w`/`h` props win.
 public define measure(doc: SemanticDocument, theme: Theme, face: Font, node_id: int) -> Size2:
+    measure_in(doc, theme, face, node_id, 0)
+
+# Measuring against an available WIDTH, because wrapping text has no
+# intrinsic size - it is as tall as the room it is given is narrow. `fill`
+# and `grow` hand out width during placement, which is after measurement,
+# so the width has to come down from the parent that already knows it.
+# 0 means unconstrained: measure as one long line.
+public define measure_in(doc: SemanticDocument, theme: Theme, face: Font, node_id: int, avail_w: int) -> Size2:
+    measure_deep(doc, theme, face, node_id, avail_w, [], [], [])
+
+# The same measurement, but able to read sizes already worked out for the
+# children. `done`/`wraps` empty means there are none and everything below
+# is measured for real - which is what a re-measure against a new width
+# has to do anyway.
+define measure_deep(doc: SemanticDocument, theme: Theme, face: Font, node_id: int, avail_w: int, done: [Size2], wraps: [int], styles: [StyleRule]) -> Size2:
     if node_shown(at(doc.nodes, node_id)):
-        measure_shown(doc, theme, face, node_id)
+        measure_shown(doc, theme, face, node_id, avail_w, done, wraps, styles)
     else:
         Size2{w: 0, h: 0}
 
-define measure_shown(doc: SemanticDocument, theme: Theme, face: Font, node_id: int) -> Size2:
+# A child's size: the one already worked out, unless nothing below it has
+# been done yet, or its subtree wraps and so has no size until it is told
+# a width.
+define kid_size(doc: SemanticDocument, theme: Theme, face: Font, k: int, avail_w: int, done: [Size2], wraps: [int], styles: [StyleRule]) -> Size2:
+    if length(done) == 0 or at(wraps, k) == 1:
+        return measure_deep(doc, theme, face, k, avail_w, done, wraps, styles)
+    at(done, k)
+
+define measure_shown(doc: SemanticDocument, theme: Theme, face: Font, node_id: int, avail_w: int, done: [Size2], wraps: [int], styles: [StyleRule]) -> Size2:
     node = at(doc.nodes, node_id)
-    style = style_of(theme, node)
+    style = ready_style(theme, node, node_id, styles)
     pad = node_pad(node, style)
     gap = node_gap(node, style)
-    ew = prop_int(node, "w", 0)
-    eh = prop_int(node, "h", 0)
+    # A percentage is not an intrinsic size - it is a claim on the parent,
+    # settled during placement. Measuring it as if it were a pixel count
+    # would have `40%` mean forty pixels.
+    ew = if prop_percent(node, "w") >= 0 then 0 else prop_int(node, "w", 0)
+    eh = if prop_percent(node, "h") >= 0 then 0 else prop_int(node, "h", 0)
     ts = text_size(node_text(node), node_size(node, style), face)
     if length(node.children) == 0:
-        Size2{w: if ew > 0 then ew else ts.wide + pad * 2, h: if eh > 0 then eh else ts.high + pad * 2}
+        # A wrapping leaf is as tall as the lines it breaks into. Wrapping
+        # needs a width to break against, so it only happens when the node
+        # was given one - `wrap: 1` without a `w:` has nothing to wrap to.
+        # The box to wrap against: this node's own width if it was given
+        # one, else whatever the parent says is available.
+        box = if ew > 0 then ew else avail_w
+        room = box - pad * 2
+        wrapped = node_wraps(node) and room > 0
+        wh = if wrapped then wrapped_high(node_text(node), node_size(node, style), face, room) else ts.high
+        # A wrapping leaf claims the whole width it was offered; that is
+        # what wrapping MEANS, and reporting its one-line width would let a
+        # parent size itself as if the text never broke.
+        # A wrapping leaf is as wide as its longest word, not its whole
+        # line. What width it ends up with is its parent's business, and
+        # claiming the unbroken line made every ancestor size itself for a
+        # width nobody was going to hand out.
+        least = if node_wraps(node) then widest_word(node_text(node), node_size(node, style), face) + pad * 2 else ts.wide + pad * 2
+        cw = leaf_wide(ew, wrapped, box, least)
+        Size2{w: cw, h: if eh > 0 then eh else wh + pad * 2}
     else:
         row = node_row(node, style)
+        stacked = node_stacks(node)
+        cols = node_grid(node)
         edit main = 0
         edit cross = 0
+        edit tallest = 0
+        edit shown_n = 0
+        # What a child has to work with across the box. For a column that
+        # is the inner width outright; for a row it is an upper bound,
+        # which is the honest answer before the main axis is shared out.
+        kid_w = inner_room(ew, avail_w, pad)
         edit i = 0
         loop c in node.children:
             if node_shown(at(doc.nodes, c)):
-                cs = measure(doc, theme, face, c)
+                cs = kid_size(doc, theme, face, c, kid_w, done, wraps, styles)
                 cm = if row then cs.w else cs.h
                 cc = if row then cs.h else cs.w
-                if i > 0:
-                    main = main + gap
-                main = main + cm
+                if cs.h > tallest:
+                    tallest = cs.h
+                shown_n = shown_n + 1
+                if stacked:
+                    # Everything shares the box, so the box is the biggest
+                    # of them rather than the sum.
+                    if cm > main:
+                        main = cm
+                else:
+                    if i > 0:
+                        main = main + gap
+                    main = main + cm
                 if cc > cross:
                     cross = cc
                 i = i + 1
         cw = if row then main else cross
         ch = if row then cross else main
-        Size2{w: if ew > 0 then ew else cw + pad * 2, h: if eh > 0 then eh else ch + pad * 2}
+        # A grid is as tall as its rows, whatever the flow arithmetic said.
+        gh = grid_high(shown_n, if cols > 0 then cols else 1, tallest, gap)
+        used_h = if cols > 0 then gh else ch
+        Size2{w: if ew > 0 then ew else cw + pad * 2, h: if eh > 0 then eh else used_h + pad * 2}
 
 # Children in `order:` order (default 0, stable on ties). Selection sort - child
 # counts are small.
 define child_order(doc: SemanticDocument, node: Node) -> [int]:
     ids = node.children
     n = length(ids)
+    # Almost nothing uses `order`, and the sort below is a selection sort
+    # that rescans the taken list and re-reads a prop in its innermost
+    # loop - cubic, with a props walk inside. A list of 24 rows paid about
+    # fourteen thousand rounds of it, in the measure pass AND the placement
+    # pass, to arrive at the order it was already in.
+    edit any_order = false
+    loop k in ids:
+        if prop_int(at(doc.nodes, k), "order", 0) != 0:
+            any_order = true
+    if not any_order:
+        return ids
     edit out = []
     edit taken = []
     loop _p in 0..<n:
@@ -189,6 +402,67 @@ define child_order(doc: SemanticDocument, node: Node) -> [int]:
         out = append(out, at(ids, best_i))
     out
 
+# --- the size cache --------------------------------------------------------
+# Measuring re-walks a node's whole subtree, and placement measures every
+# child, so a node twelve deep was measured twelve times over. Sizes are
+# computed ONCE here, bottom-up, and read from an array during placement.
+#
+# The one thing that cannot be cached is a subtree containing WRAPPING
+# text: its height depends on the width its parent hands it, which is only
+# known on the way down. Those are re-measured for real. A flag per node
+# says whether its subtree contains any, so the exception costs a lookup
+# rather than a walk.
+
+public type Sizes: box: [Size2], wraps: [int], styles: [StyleRule]
+
+define wraps_below(doc: SemanticDocument, node_id: int, out: [int]) -> truth:
+    node = at(doc.nodes, node_id)
+    edit any = node_wraps(node)
+    loop k in node.children:
+        if at(out, k) == 1:
+            any = true
+    any
+
+# One bottom-up pass, FORWARD through the array, and each node reads the
+# sizes its children already have rather than re-walking them - which is
+# what made this pass cost the sum of every subtree instead of the tree. A node has to be done
+# after its children, and the builders' convention puts children at lower
+# indices than the parents that name them - they append children first and
+# the root last. Walking backwards meant every parent read flags its
+# children had not set yet, so a column containing a wrapping paragraph
+# was not marked as wrapping and used its unconstrained size. The layout
+# came out faster and wrong.
+public define measure_all(doc: SemanticDocument, theme: Theme, face: Font) -> Sizes:
+    n = length(doc.nodes)
+    edit box = []
+    edit wraps = []
+    edit styles = []
+    loop i in 0..<n:
+        box = append(box, Size2{w: 0, h: 0})
+        wraps = append(wraps, 0)
+        styles = append(styles, style_of(theme, at(doc.nodes, i)))
+    loop i in 0..<n:
+        wraps = set(wraps, i, if wraps_below(doc, i, wraps) then 1 else 0)
+        box = set(box, i, measure_deep(doc, theme, face, i, 0, box, wraps, styles))
+    Sizes{box: box, wraps: wraps, styles: styles}
+
+# The size to use for a child: the cached one, unless something below it
+# wraps and the width on offer is not the one it was measured against.
+# The same size with its MAIN dimension replaced - which axis that is
+# depends on the direction the box flows in.
+define with_main(cs: Size2, row: truth, main: int) -> Size2:
+    if row then Size2{w: main, h: cs.h} else Size2{w: cs.w, h: main}
+
+define sized(doc: SemanticDocument, theme: Theme, face: Font, sizes: Sizes, k: int, avail_w: int) -> Size2:
+    if at(sizes.wraps, k) == 1:
+        # With the sizes handed along, only the chain down to the text that
+        # actually breaks is walked again; everything beside it is already
+        # known, and known correctly, because nothing in it depends on the
+        # width. Without them, every ancestor of one paragraph re-measured
+        # its whole subtree - the paragraph made the layout quadratic.
+        return measure_deep(doc, theme, face, k, avail_w, sizes.box, sizes.wraps, sizes.styles)
+    at(sizes.box, k)
+
 # --- pass 2: placement with flex ---
 # Place a node in its assigned box, then flow its children: `grow` expands
 # children to fill leftover main space; else `justify` distributes it; `align`
@@ -197,13 +471,23 @@ define child_order(doc: SemanticDocument, node: Node) -> [int]:
 # shared ori_display seam. (measure() is re-walked per child - fine for UI-sized
 # trees; memoize if it ever matters.)
 define place_nodes(doc: SemanticDocument, theme: Theme, face: Font, node_id: int, x: int, y: int, w: int, h: int, measured: [Measured]) -> [Measured]:
+    place_sized(doc, theme, face, node_id, x, y, w, h, measured, measure_all(doc, theme, face))
+
+define place_sized(doc: SemanticDocument, theme: Theme, face: Font, node_id: int, x: int, y: int, w: int, h: int, measured: [Measured], sizes: Sizes) -> [Measured]:
     node = at(doc.nodes, node_id)
-    style = style_of(theme, node)
-    edit out = set(measured, node_id, Measured{node_id: node_id, rect: Rect{x: x, y: y, wide: w, high: h}})
+    style = ready_style(theme, node, node_id, sizes.styles)
+    # Rebound onto ITSELF, which is what makes this write in place. Naming
+    # a new list here copied all 151 entries once per node - a whole
+    # quadratic hidden in one innocent-looking assignment, and most of what
+    # the frame region was being asked to hold.
+    edit acc = measured
+    acc = set(acc, node_id, Measured{node_id: node_id, rect: Rect{x: x, y: y, wide: w, high: h}})
     if length(node.children) == 0:
-        out
+        acc
     else:
         row = node_row(node, style)
+        stacked = node_stacks(node)
+        cols = node_grid(node)
         pad = node_pad(node, style)
         gap = node_gap(node, style)
         ix = x + pad
@@ -214,14 +498,38 @@ define place_nodes(doc: SemanticDocument, theme: Theme, face: Font, node_id: int
         cross_inner = if row then ih else iw
         main_start = if row then ix else iy
         cross_start = if row then iy else ix
+        # Children get the inner WIDTH to wrap against either way.
+        cross_room = iw
         kids = child_order(doc, node)
+        # Measure every child ONCE and keep it. This loop and the placement
+        # loop below both need every child's size, and measuring re-walks
+        # the whole subtree - doing it twice made the layout quadratic in
+        # the depth of the tree. It was 25ms a frame on a screen with a few
+        # hundred nodes, which is most of a frame gone before anything is
+        # drawn.
+        edit kid_sizes = []
+        edit tallest = 0
+        loop k in kids:
+            raw = sized(doc, theme, face, sizes, k, cross_room)
+            # A share of the room is settled HERE, before anything counts
+            # what is left over. Settled after, a 70% fill and a grow:1
+            # track each took their piece of the same space and the row
+            # came out wider than the box it was in.
+            pc = if row then prop_percent(at(doc.nodes, k), "w") else prop_percent(at(doc.nodes, k), "h")
+            share = main_inner * pc // 100
+            capped = if share > main_inner then main_inner else share
+            cs = if pc >= 0 then with_main(raw, row, capped) else raw
+            kid_sizes = append(kid_sizes, cs)
+            if node_shown(at(doc.nodes, k)) and cs.h > tallest:
+                tallest = cs.h
         edit content_main = 0
         edit total_grow = 0
         edit i = 0
         edit shown_kids = 0
+        edit at_k = 0
         loop k in kids:
             if node_shown(at(doc.nodes, k)):
-                cs = measure(doc, theme, face, k)
+                cs = at(kid_sizes, at_k)
                 cm = if row then cs.w else cs.h
                 if i > 0:
                     content_main = content_main + gap
@@ -229,7 +537,25 @@ define place_nodes(doc: SemanticDocument, theme: Theme, face: Font, node_id: int
                 total_grow = total_grow + prop_int(at(doc.nodes, k), "grow", 0)
                 i = i + 1
                 shown_kids = shown_kids + 1
+            at_k = at_k + 1
         leftover = main_inner - content_main
+        # Too much content for the box: shrink everyone by the same
+        # proportion so it fits. Without this a row of panels simply runs
+        # off the edge of the window, which is what flow does when nobody
+        # tells it the space ran out. Shrinking is not the same as growing
+        # in reverse - `grow` shares out a surplus, this shares out a debt.
+        # A clipping node has already said it accepts overflow - that is
+        # what clipping MEANS - so it does not squeeze. Shrinking and
+        # scrolling are the two answers to the same question and a node
+        # picks one: refuse the overflow, or cut it.
+        crowded = content_main > main_inner and main_inner > 0
+        squeeze = if crowded and not node_clips(node) then main_inner else 0
+        # Scrolling shifts where the children start. `end` works it out
+        # from what did not fit; a number says it outright.
+        overflow = if leftover < 0 then 0 - leftover else 0
+        shift_main = if scrolls_to_end(node) and row then overflow else 0
+        shift_x = if row then shift_main else node_scroll_x(node)
+        shift_y = if row then node_scroll_y(node) else shift_main + node_scroll_y(node)
         edit cursor = main_start
         edit extra_gap = 0
         if total_grow == 0 and leftover > 0:
@@ -239,26 +565,43 @@ define place_nodes(doc: SemanticDocument, theme: Theme, face: Font, node_id: int
             else:
                 cursor = main_start + align_factor(just) * leftover // 1000
         align = prop_val(node, "align")
-        edit acc = out
+        edit placed_n = 0
+        edit at_p = 0
         loop k in kids:
             if node_shown(at(doc.nodes, k)):
-                cs = measure(doc, theme, face, k)
+                cs = at(kid_sizes, at_p)
                 edit cm = if row then cs.w else cs.h
                 cc = if row then cs.h else cs.w
                 if total_grow > 0 and leftover > 0:
                     cm = cm + prop_int(at(doc.nodes, k), "grow", 0) * leftover // total_grow
-                fillv = prop_val(at(doc.nodes, k), "fill")
-                edit ccross = cc
+                if squeeze > 0 and content_main > 0:
+                    cm = cm * squeeze // content_main
+                kid = at(doc.nodes, k)
+                pc_cross = if row then prop_percent(kid, "h") else prop_percent(kid, "w")
+                fillv = prop_val(kid, "fill")
+                edit ccross = if pc_cross >= 0 then cross_inner * pc_cross // 100 else cc
                 edit cross_off = 0
                 if fillv == "1" or fillv == "true":
                     ccross = cross_inner
                 else:
-                    cross_off = align_factor(align) * (cross_inner - cc) // 1000
-                if row:
-                    acc = place_nodes(doc, theme, face, k, cursor, cross_start + cross_off, cm, ccross, acc)
+                    cross_off = align_factor(align) * (cross_inner - ccross) // 1000
+                if cols > 0:
+                    # Column and row from the child's position in the list,
+                    # not from where the cursor happens to have got to.
+                    cell_w = (iw - gap * (cols - 1)) // cols
+                    cell_h = tallest
+                    col_i = placed_n % cols
+                    row_i = placed_n // cols
+                    acc = place_sized(doc, theme, face, k, ix + col_i * (cell_w + gap), iy + row_i * (cell_h + gap), cell_w, cell_h, acc, sizes)
+                    placed_n = placed_n + 1
+                else if stacked:
+                    acc = place_sized(doc, theme, face, k, ix, iy, iw, ih, acc, sizes)
+                else if row:
+                    acc = place_sized(doc, theme, face, k, cursor - shift_x, cross_start + cross_off - shift_y, cm, ccross, acc, sizes)
                 else:
-                    acc = place_nodes(doc, theme, face, k, cross_start + cross_off, cursor, ccross, cm, acc)
+                    acc = place_sized(doc, theme, face, k, cross_start + cross_off - shift_x, cursor - shift_y, ccross, cm, acc, sizes)
                 cursor = cursor + cm + gap + extra_gap
+            at_p = at_p + 1
         acc
 
 # Two-pass layout: measure intrinsic sizes, then place from the root at (16,16),
@@ -275,7 +618,7 @@ public define layout_in(doc: SemanticDocument, theme: Theme, face: Font, box: Re
     if n == 0:
         out
     else:
-        place_nodes(doc, theme, face, doc.root, to_whole(box.x), to_whole(box.y), to_whole(box.wide), to_whole(box.high), out)
+        place_sized(doc, theme, face, doc.root, to_whole(box.x), to_whole(box.y), to_whole(box.wide), to_whole(box.high), out, measure_all(doc, theme, face))
 
 public define layout(doc: SemanticDocument, theme: Theme, face: Font) -> [Measured]:
     n = length(doc.nodes)
@@ -286,11 +629,44 @@ public define layout(doc: SemanticDocument, theme: Theme, face: Font) -> [Measur
         out
     else:
         rs = measure(doc, theme, face, doc.root)
-        place_nodes(doc, theme, face, doc.root, 16, 16, rs.w, rs.h, out)
+        place_sized(doc, theme, face, doc.root, 16, 16, rs.w, rs.h, out, measure_all(doc, theme, face))
 
 # Resolve against a host-given root box (see layout_in).
 public define resolve_in(doc: SemanticDocument, theme: Theme, face: Font, box: Rect) -> DisplayList:
     paint(doc, theme, face, layout_in(doc, theme, face, box))
+
+# --- one layout, used for everything ---------------------------------------
+# resolve_in, pick_spoken and every stage lookup each laid the tree out
+# again, so an app that drew, hovered and asked where one node was paid for
+# THREE full layouts a frame - measuring every run of text three times over.
+# The layout is the expensive thing; do it once and hand it round.
+#
+#     placed = layout_in(doc, theme, face, box)
+#     list = resolve_placed(doc, theme, face, placed)
+#     who = pick_placed(doc, theme, placed, mx, my)
+public define resolve_placed(doc: SemanticDocument, theme: Theme, face: Font, placed: [Measured]) -> DisplayList:
+    paint(doc, theme, face, placed)
+
+public define pick_placed(doc: SemanticDocument, theme: Theme, placed: [Measured], x: int, y: int) -> text:
+    if length(doc.nodes) == 0:
+        return ""
+    edit layer = highest_layer(doc)
+    edit spoken = ""
+    loop:
+        if layer < 0 or spoken is not "":
+            break
+        spoken = pick_layer(doc, theme, placed, doc.root, x, y, "", layer, 0)
+        layer = layer - 1
+    spoken
+
+# The rect of the node that answers to `name`, out of a layout already
+# done. What a host needs when it draws its own art into a reserved box.
+public define rect_of(doc: SemanticDocument, placed: [Measured], name: text) -> Rect:
+    edit found = Rect{x: 0.0, y: 0.0, wide: 0.0, high: 0.0}
+    loop m in placed:
+        if node_do(at(doc.nodes, m.node_id)) is name:
+            found = m.rect
+    found
 
 public define resolve(doc: SemanticDocument, theme: Theme, face: Font) -> DisplayList:
     paint(doc, theme, face, layout(doc, theme, face))
@@ -304,15 +680,95 @@ public define resolve(doc: SemanticDocument, theme: Theme, face: Font) -> Displa
 define paint(doc: SemanticDocument, theme: Theme, face: Font, measured: [Measured]) -> DisplayList:
     # An empty document has no root to start from - `root` is still 0.
     if length(doc.nodes) == 0:
-        empty_list()
-    else:
-        paint_from(doc, theme, face, measured, doc.root, empty_list())
+        return empty_list()
+    edit list = empty_list()
+    edit layer = 0
+    top_layer = highest_layer(doc)
+    loop:
+        if layer > top_layer:
+            break
+        list = paint_layer(doc, theme, face, measured, doc.root, list, layer, 0)
+        layer = layer + 1
+    list
+
+define highest_layer(doc: SemanticDocument) -> int:
+    edit high = 0
+    loop node in doc.nodes:
+        l = node_layer(node)
+        if l > high:
+            high = l
+    high
+
+# Paint the nodes belonging to `want`. A node inherits its parent's layer
+# unless it names a higher one, so a dialog lifts everything inside it.
+define paint_layer(doc: SemanticDocument, theme: Theme, face: Font, measured: [Measured], node_id: int, into: DisplayList, want: int, inherited: int) -> DisplayList:
+    node = at(doc.nodes, node_id)
+    mine = if node_layer(node) > inherited then node_layer(node) else inherited
+    edit list = if mine == want then paint_one(doc, theme, face, measured, node_id, into) else into
+    clipping = node_clips(node) and mine == want
+    if clipping:
+        list = push_cmd(list, SetClip(at(measured, node_id).rect, node_id))
+    loop k in child_order(doc, node):
+        if node_shown(at(doc.nodes, k)):
+            list = paint_layer(doc, theme, face, measured, k, list, want, mine)
+    if clipping:
+        list = push_cmd(list, SetClip(Rect{x: 0.0, y: 0.0, wide: 0.0, high: 0.0}, node_id))
+        # After the clip is lifted, so the bar is never cut by the box it
+        # belongs to.
+        if node_bars(node):
+            list = add_bar_for(doc, theme, measured, node_id, list)
+    list
+
+# The track and its thumb. The thumb is as tall a share of the track as
+# the box is of the content, and sits as far down it as you have scrolled -
+# which is the whole language of a scrollbar in one sentence.
+define add_bar_for(doc: SemanticDocument, theme: Theme, measured: [Measured], node_id: int, into: DisplayList) -> DisplayList:
+    node = at(doc.nodes, node_id)
+    box = at(measured, node_id).rect
+    reach = content_below(doc, measured, node_id, box)
+    seen = to_whole(box.high)
+    if reach <= seen or seen <= 0:
+        return into
+    style = style_of(theme, node)
+    wide = 4.0
+    x = box.x + box.wide - wide - 2.0
+    tall = box.high - 4.0
+    grip = tall * to_real(seen) / to_real(reach)
+    least = 24.0
+    high = if grip < least then least else grip
+    away = to_real(node_scroll_y(node))
+    span = to_real(reach - seen)
+    raw = if span > 0.0 then away / span else 0.0
+    # Clamped, so a scroll value the app has not yet caught up with can
+    # never push the thumb outside its own track.
+    frac = if raw < 0.0 then 0.0 else if raw > 1.0 then 1.0 else raw
+    y = box.y + 2.0 + (tall - high) * frac
+    track = push_cmd(into, DrawRoundRect(Rect{x: x, y: box.y + 2.0, wide: wide, high: tall}, bar_track(style), 2, node_id))
+    push_cmd(track, DrawRoundRect(Rect{x: x, y: y, wide: wide, high: high}, bar_thumb(style), 2, node_id))
+
+# The bar borrows the node's own colours: its border for the track, its
+# text colour for the thumb. A scrollbar is chrome, and chrome that needs
+# its own two theme entries per scrolling box is chrome nobody will set.
+define bar_track(style: StyleRule) -> text:
+    if style.border_colour != "" then style.border_colour else "#2a2a2aff"
+
+define bar_thumb(style: StyleRule) -> text:
+    if style.fg_colour != "" then style.fg_colour else "#6a6a6aff"
 
 define paint_from(doc: SemanticDocument, theme: Theme, face: Font, measured: [Measured], node_id: int, into: DisplayList) -> DisplayList:
+    node = at(doc.nodes, node_id)
     edit list = paint_one(doc, theme, face, measured, node_id, into)
-    loop k in child_order(doc, at(doc.nodes, node_id)):
+    clipping = node_clips(node)
+    if clipping:
+        list = push_cmd(list, SetClip(at(measured, node_id).rect, node_id))
+    loop k in child_order(doc, node):
         if node_shown(at(doc.nodes, k)):
             list = paint_from(doc, theme, face, measured, k, list)
+    # Back to whatever the parent had. Nesting a clip inside a clip is not
+    # supported yet - the inner one wins and the outer is dropped - which is
+    # honest for a single scissor rect and enough for a list in a panel.
+    if clipping:
+        list = push_cmd(list, SetClip(Rect{x: 0.0, y: 0.0, wide: 0.0, high: 0.0}, node_id))
     list
 
 define paint_one(doc: SemanticDocument, theme: Theme, face: Font, measured: [Measured], i: int, into: DisplayList) -> DisplayList:
@@ -330,6 +786,14 @@ define paint_one(doc: SemanticDocument, theme: Theme, face: Font, measured: [Mea
         # fill inset by the border width with a correspondingly tighter
         # radius. Two shaded boxes rather than a stroke primitive - the
         # ring falls out of the overlap and both edges stay smooth.
+        # A shadow sits under everything else the node draws, nudged down
+        # by half its blur - the direction light comes from in every UI
+        # anyone has ever used.
+        blur = prop_int(node, "shadow", style.shadow)
+        shade = node_shadow_colour(node, style)
+        if blur > 0 and shade != "":
+            drop = Rect{x: r.x, y: r.y + to_real(blur) / 2.0, wide: r.wide, high: r.high}
+            list = push_cmd(list, DrawShadow(drop, shade, rad, blur, i))
         edge = node_border_colour(node, style)
         bw = node_border(node, style)
         ringed = bw > 0 and edge != ""
@@ -339,6 +803,13 @@ define paint_one(doc: SemanticDocument, theme: Theme, face: Font, measured: [Mea
         irad = if ringed and rad > bw then rad - bw else if ringed then 0 else rad
         if bg != "":
             list = push_box(list, inner, bg, irad, i)
+        # `icon: name` draws a named vector icon, sized to the smaller
+        # side of the node's box. Same idea as `image`, but the art comes
+        # from the icon set rather than from a file on disk.
+        ico = prop_val(node, "icon")
+        if ico != "":
+            side = if r.wide < r.high then to_whole(r.wide) else to_whole(r.high)
+            list = push_cmd(list, DrawIcon(Point{x: r.x, y: r.y}, ico, side, i))
         # `image: name` fills the node's box with a picture the host
         # resolves - the box is the frame, the art is the content.
         img = prop_val(node, "image")
@@ -349,14 +820,13 @@ define paint_one(doc: SemanticDocument, theme: Theme, face: Font, measured: [Mea
         # the same words that center children, applied to the words.
         if node_text(node) != "":
             pad = node_pad(node, style)
-            ts = text_size(node_text(node), node_size(node, style), face)
-            edit tx = r.x + pad
-            edit ty = r.y + pad
-            if prop_val(node, "align") == "center" and length(node.children) == 0:
-                tx = r.x + (to_whole(r.wide) - to_whole(ts.wide)) // 2
-            if prop_val(node, "justify") == "center" and length(node.children) == 0:
-                ty = r.y + (to_whole(r.high) - to_whole(ts.high)) // 2
-            list = push_cmd(list, DrawText(Point{x: tx, y: ty}, node_text(node), node_fg(node, style), node_size(node, style), i))
+            size = node_size(node, style)
+            room = to_whole(r.wide) - pad * 2
+            lines = if node_wraps(node) and room > 0:
+                wrap_text(node_text(node), size, face, room)
+            else:
+                [node_text(node)]
+            list = push_lines(list, lines, r, pad, size, node_fg(node, style), face, node, i)
     list
 
 # Picking walks the TREE in the same order paint does - parent, then
@@ -388,6 +858,24 @@ define pick_walk(doc: SemanticDocument, theme: Theme, measured: [Measured], node
             best = pick_walk(doc, theme, measured, k, x, y, best)
     best
 
+# Lay the lines down, each centred or flushed the same way one line would
+# have been. One DrawText per line - the painter has no idea text wraps and
+# does not need to.
+define push_lines(list: DisplayList, lines: [text], r: Rect, pad: int, size: int, ink: text, face: Font, node: Node, src: int) -> DisplayList:
+    lh = line_high(size, face)
+    block = length(lines) * lh
+    centred = prop_val(node, "align") == "center" and length(node.children) == 0
+    middled = prop_val(node, "justify") == "center" and length(node.children) == 0
+    top = if middled then r.y + (r.high - to_real(block)) / 2.0 else r.y + to_real(pad)
+    edit out = list
+    edit n = 0
+    loop line in lines:
+        ts = text_size(line, size, face)
+        x = if centred then r.x + (r.wide - to_real(ts.wide)) / 2.0 else r.x + to_real(pad)
+        out = push_cmd(out, DrawText(Point{x: x, y: top + to_real(n * lh)}, line, ink, size, src))
+        n = n + 1
+    out
+
 # The click a UI claims at (x, y): the topmost hit node's `do:` name;
 # "\{mute\}" when a PAINTED node without a do: takes the click (a card
 # under a button still blocks the world); "" when the UI is air there -
@@ -395,9 +883,36 @@ define pick_walk(doc: SemanticDocument, theme: Theme, measured: [Measured], node
 # game underneath keeps its clicks.
 public define pick_spoken(doc: SemanticDocument, theme: Theme, face: Font, box: Rect, x: int, y: int) -> text:
     if length(doc.nodes) == 0:
-        ""
-    else:
-        pick_walk(doc, theme, layout_in(doc, theme, face, box), doc.root, x, y, "")
+        return ""
+    placed = layout_in(doc, theme, face, box)
+    # Highest layer first: what is drawn on top is what answers, and the
+    # search stops as soon as a layer claims the point.
+    edit layer = highest_layer(doc)
+    edit spoken = ""
+    loop:
+        if layer < 0 or spoken is not "":
+            break
+        spoken = pick_layer(doc, theme, placed, doc.root, x, y, "", layer, 0)
+        layer = layer - 1
+    spoken
+
+define pick_layer(doc: SemanticDocument, theme: Theme, measured: [Measured], node_id: int, x: int, y: int, so_far: text, want: int, inherited: int) -> text:
+    node = at(doc.nodes, node_id)
+    mine = if node_layer(node) > inherited then node_layer(node) else inherited
+    edit best = so_far
+    if mine == want and rect_contains(at(measured, node_id).rect, Point{x: x, y: y}):
+        d = node_do(node)
+        if d != "":
+            best = d
+        else:
+            style = style_of(theme, node)
+            painted = node_bg(node, style) != "" or node_text(node) != "" or prop_val(node, "image") != ""
+            if painted and best == "":
+                best = "\{mute\}"
+    loop k in child_order(doc, node):
+        if node_shown(at(doc.nodes, k)):
+            best = pick_layer(doc, theme, measured, k, x, y, best, want, mine)
+    best
 
 # Hit-test against the host-box layout (see layout_in). -1 = miss.
 define pick_id_walk(doc: SemanticDocument, measured: [Measured], node_id: int, x: int, y: int, so_far: int) -> int:

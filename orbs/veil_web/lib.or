@@ -33,6 +33,9 @@ define cmd_json(cmd: DrawCmd) -> text:
     choose cmd:
         DrawRect(r, colour, src) -> rect_json(r, colour, src)
         DrawRoundRect(r, colour, _radius, src) -> rect_json(r, colour, src)
+        # The web side will want a real box-shadow rather than a rect.
+        DrawShadow(_r, _c, _rad, _blur, _src) -> ""
+        SetClip(_r, _src) -> ""
         DrawText(p, content, colour, size, src) -> text_json(p, content, colour, size, src)
         DrawIcon(p, icon, size, src) -> icon_json(p, icon, size, src)
         _ -> ""

@@ -2,6 +2,7 @@
 
 use ori_geometry
 use typeface
+use text
 
 # A measured node — final pixel rect after layout pass.
 public type Measured: node_id: int, rect: Rect
@@ -14,8 +15,111 @@ public type Measured: node_id: int, rect: Rect
 public define text_size(content: text, size_px: int, face: Font) -> Size:
     scale = to_real(size_px) / to_real(face.upm)
     letters = bytes_of(content)
+    n = bytes_count(letters)
     edit wide = 0.0
-    loop i in 0..<bytes_count(letters):
-        wide = wide + to_real(advance_width(face, glyph_id(face, byte_at(letters, i)))) * scale
+    edit prev = 0
+    edit i = 0
+    loop:
+        if i >= n:
+            break
+        g = glyph_id(face, cp_at(letters, i))
+        # Measure what will actually be DRAWN. The renderer kerns, so a
+        # measurement that does not would report a line wider than the one
+        # you see, and every centred or right-aligned thing would sit off.
+        if prev > 0:
+            wide = wide + to_real(kern_cached(face, prev, g)) * scale
+        wide = wide + to_real(advance_width(face, g)) * scale
+        prev = g
+        i = i + cp_step(letters, i)
     high = if bytes_count(letters) == 0 then 0.0 else to_real(font_ascent(face) - font_descent(face)) * scale
     Size{wide: to_whole(wide + 0.5), high: to_whole(high + 0.5)}
+
+# The height of one line of this face at this size. Wrapping needs it, and
+# so does anything stacking lines, so there is one answer.
+public define line_high(size_px: int, face: Font) -> int:
+    scale = to_real(size_px) / to_real(face.upm)
+    to_whole(to_real(font_ascent(face) - font_descent(face)) * scale + 0.5)
+
+# Break `content` into lines that each fit `max_w`, at spaces. Greedy, which
+# is what every UI does - the fancy algorithms are for books.
+#
+# A word longer than the whole width stays on its own line and overflows
+# rather than being cut mid-word: a clipped word you can still read beats a
+# broken one you cannot.
+public define wrap_text(content: text, size_px: int, face: Font, max_w: int) -> [text]:
+    if max_w <= 0 or length(content) == 0:
+        return [content]
+    # Each word measured ONCE and the running width carried along. The
+    # obvious version re-measures the whole line every time a word is added,
+    # so an eighty-word paragraph walks about three thousand letters to
+    # break eighty. The one thing given up is the kern across a space, so a
+    # break can land a pixel earlier than it strictly had to - and the lines
+    # themselves are measured for real when they are drawn.
+    words = split(content, " ")
+    space = text_size(" ", size_px, face).wide
+    edit lines = []
+    edit line = ""
+    edit run = 0.0
+    loop w in words:
+        ww = text_size(w, size_px, face).wide
+        add = if line == "" then ww else space + ww
+        if run + add <= max_w or line == "":
+            line = if line == "" then w else "{line} {w}"
+            run = run + add
+        else:
+            lines = append(lines, line)
+            line = w
+            run = ww
+    if line != "":
+        lines = append(lines, line)
+    if length(lines) == 0 then [content] else lines
+
+# How tall that wrapped block is.
+public define wrapped_high(content: text, size_px: int, face: Font, max_w: int) -> int:
+    length(wrap_text(content, size_px, face, max_w)) * line_high(size_px, face)
+
+# Which byte offset in `content` a click at `x` pixels from its left edge
+# lands on. A click has to become a caret position, and the only honest way
+# is to walk the same advances the renderer draws with. Lands on the NEARER
+# side of a character, so clicking a letter's right half puts the caret
+# after it - which is what every editor does and what your hand expects.
+public define caret_at(content: text, size_px: int, face: Font, x: int) -> int:
+    scale = to_real(size_px) / to_real(face.upm)
+    b = bytes_of(content)
+    n = bytes_count(b)
+    edit run = 0.0
+    edit prev = 0
+    edit i = 0
+    edit best = 0
+    edit best_gap = 1000000.0
+    loop:
+        if i > n:
+            break
+        gap = if to_real(x) > run then to_real(x) - run else run - to_real(x)
+        if gap < best_gap:
+            best_gap = gap
+            best = i
+        if i >= n:
+            break
+        # Step a whole character, adding its advance and the kern before it.
+        step = cp_step(b, i)
+        g = glyph_id(face, cp_at(b, i))
+        if prev > 0:
+            run = run + to_real(kern_cached(face, prev, g)) * scale
+        run = run + to_real(advance_width(face, g)) * scale
+        prev = g
+        i = i + step
+    best
+
+# The narrowest a wrapping run can be drawn without breaking a word. CSS
+# calls this min-content, and it is what a wrapping node should report as
+# its own width: the box it ends up in is its parent's business, and a
+# paragraph that reported its whole unbroken line made every ancestor
+# claim a width no one was going to give it.
+public define widest_word(content: text, size_px: int, face: Font) -> int:
+    edit widest = 0
+    loop w in split(content, " "):
+        wide = to_whole(text_size(w, size_px, face).wide)
+        if wide > widest:
+            widest = wide
+    widest

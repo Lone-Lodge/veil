@@ -11,7 +11,7 @@ use veil_token
 # to live only as per-node props, so a document had to carry `radius: 7` and
 # `size: 12` - a document saying how a thing LOOKS, which is the theme's job.
 # A node prop still wins where one thing genuinely differs.
-public type StyleRule: role_name: text, padding: int, gap: int, fg_colour: text, bg_colour: text, direction: text, radius: int, size: int, border: int, border_colour: text
+public type StyleRule: role_name: text, padding: int, gap: int, fg_colour: text, bg_colour: text, direction: text, radius: int, size: int, border: int, border_colour: text, shadow: int, shadow_colour: text
 
 public type Theme: rules: [StyleRule]
 
@@ -34,13 +34,29 @@ public define lookup_style(theme: Theme, role: Role) -> StyleRule:
 # item_on - and the document has to pick the look by name, which is exactly
 # the thing the document is not supposed to know.
 public define lookup_state(theme: Theme, role: Role, state: text) -> StyleRule:
-    edit found = StyleRule{role_name: role.name, padding: 0, gap: 0, fg_colour: "", bg_colour: "", direction: "", radius: 0, size: 0, border: 0, border_colour: ""}
-    edit exact = false
+    # Most nodes are in no particular state, and building "role:state" for
+    # them - a string interpolation per node, in both the measure pass and
+    # the placement pass - was a real slice of every frame. Ask for the
+    # plain rule without ever composing a name.
+    if state == "":
+        return plain_rule(theme, role.name)
     want = "{role.name}:{state}"
+    edit found = nothing_rule(role.name)
+    edit exact = false
     loop rule in theme.rules:
         if rule.role_name == role.name and not exact:
             found = rule
-        if state != "" and rule.role_name == want:
+        if rule.role_name == want:
             found = rule
             exact = true
     found
+
+define plain_rule(theme: Theme, name: text) -> StyleRule:
+    loop rule in theme.rules:
+        if rule.role_name == name:
+            return rule
+    nothing_rule(name)
+
+# What a role the theme has never heard of looks like: nothing at all.
+define nothing_rule(name: text) -> StyleRule:
+    StyleRule{role_name: name, padding: 0, gap: 0, fg_colour: "", bg_colour: "", direction: "", radius: 0, size: 0, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}

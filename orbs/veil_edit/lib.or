@@ -1,0 +1,233 @@
+# veil_edit - a line of text you can edit, and where the caret is in it.
+#
+# Both apps that needed a text field wrote the same thing from scratch: a
+# codepoint-to-text table because Orion cannot make a byte from an int, a
+# backspace that walks back over UTF-8 continuation bytes, and an append
+# that could only ever add at the end. Same code twice, and neither could
+# put the caret anywhere but after the last letter.
+#
+#     e = edit_new("")
+#     e = edit_type(e, 104)        # a WM_CHAR code
+#     e = edit_left(e)
+#     before = edit_before(e)      # draw these three in a row and the
+#     after = edit_after(e)        # caret lands where it belongs
+#
+# The caret is a BYTE offset, and every move steps whole characters, so it
+# can never come to rest in the middle of an å.
+
+use text
+
+# `anchor` is the other end of a selection. Equal to the caret means there
+# is no selection, which is the common case and costs nothing to carry.
+public type Edit: content: text, caret: int, anchor: int
+
+public define edit_new(t: text) -> Edit:
+    n = bytes_count(bytes_of(t))
+    Edit{content: t, caret: n, anchor: n}
+
+# The characters a field accepts, as one string. Orion has no "make a byte
+# from an int", so the alphabet has to exist as text and a typed code is
+# found by its position in it. ASCII 32..126 is one byte each; the six
+# Swedish letters after it are two.
+define alphabet() -> text:
+    " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz\{|\}~åäöÅÄÖ"
+
+define ascii_span() -> int = 95
+
+define swedish_at(code: int) -> int:
+    if code is 229 then 0
+    else if code is 228 then 1
+    else if code is 246 then 2
+    else if code is 197 then 3
+    else if code is 196 then 4
+    else if code is 214 then 5
+    else 0 - 1
+
+# One typed character, or "" for anything not carried. WM_CHAR hands over a
+# UTF-16 code unit; below 32 it is a control key and belongs to the app.
+public define char_of(code: int) -> text:
+    b = bytes_of(alphabet())
+    n = bytes_count(b)
+    plain = code >= 32 and code < 127
+    k = swedish_at(code)
+    wide = if plain then 1 else 2
+    raw = if plain then code - 32 else ascii_span() + k * 2
+    # Both arms of an if are evaluated, so the offset is clamped into the
+    # string whether or not this branch is the one that gets used.
+    from = if raw >= 0 and raw + wide <= n then raw else 0
+    got = text_of(bytes_part(b, from, from + wide))
+    if plain or k >= 0 then got else ""
+
+# --- where the caret can stand ---------------------------------------------
+# Only ever on a character boundary. A UTF-8 continuation byte is 10xxxxxx,
+# so stepping is "move one, then keep moving while you are mid-character".
+
+define is_tail(b: [int], i: int) -> truth:
+    i > 0 and byte_at(b, i) >= 128 and byte_at(b, i) < 192
+
+public define edit_left(e: Edit) -> Edit:
+    b = bytes_of(e.content)
+    edit i = if e.caret > 0 then e.caret - 1 else 0
+    loop:
+        if i <= 0 or not is_tail(b, i):
+            break
+        i = i - 1
+    moved(e, i)
+
+public define edit_right(e: Edit) -> Edit:
+    b = bytes_of(e.content)
+    n = bytes_count(b)
+    edit i = if e.caret < n then e.caret + 1 else n
+    loop:
+        if i >= n or not is_tail(b, i):
+            break
+        i = i + 1
+    moved(e, i)
+
+public define edit_home(e: Edit) -> Edit:
+    moved(e, 0)
+
+public define edit_end(e: Edit) -> Edit:
+    moved(e, bytes_count(bytes_of(e.content)))
+
+# A plain move drops the selection; a move that HOLDS keeps the anchor,
+# which is the whole difference between an arrow key and shift-arrow.
+define moved(e: Edit, to: int) -> Edit:
+    Edit{content: e.content, caret: to, anchor: to}
+
+public define edit_hold(before: Edit, after: Edit) -> Edit:
+    Edit{content: after.content, caret: after.caret, anchor: before.anchor}
+
+# --- what is on either side of it ------------------------------------------
+# Drawing these two with the caret between them puts the caret exactly where
+# it belongs, measured rather than estimated, for free.
+
+public define edit_before(e: Edit) -> text:
+    b = bytes_of(e.content)
+    cut = clamp_at(e.caret, bytes_count(b))
+    text_of(bytes_part(b, 0, cut))
+
+public define edit_after(e: Edit) -> text:
+    b = bytes_of(e.content)
+    n = bytes_count(b)
+    cut = clamp_at(e.caret, n)
+    text_of(bytes_part(b, cut, n))
+
+define clamp_at(i: int, n: int) -> int:
+    if i < 0 then 0 else if i > n then n else i
+
+# --- changing it -----------------------------------------------------------
+
+public define edit_type(e: Edit, code: int) -> Edit:
+    ch = char_of(code)
+    if ch is "":
+        return e
+    # Typing over a selection replaces it. Every editor does this and a
+    # field that does not feels broken within one keystroke.
+    flat = edit_drop(e)
+    at_i = flat.caret + bytes_count(bytes_of(ch))
+    Edit{content: "{edit_before(flat)}{ch}{edit_after(flat)}", caret: at_i, anchor: at_i}
+
+# Backspace: take the character to the LEFT, whole.
+public define edit_erase(e: Edit) -> Edit:
+    if edit_has_selection(e):
+        return edit_drop(e)
+    if e.caret <= 0:
+        return e
+    back = moved(e, edit_left(e).caret)
+    Edit{content: "{edit_before(back)}{edit_after(e)}", caret: back.caret, anchor: back.caret}
+
+# Delete: take the character to the RIGHT, whole.
+public define edit_delete(e: Edit) -> Edit:
+    if edit_has_selection(e):
+        return edit_drop(e)
+    fwd = edit_right(e)
+    if fwd.caret == e.caret:
+        return e
+    Edit{content: "{edit_before(e)}{edit_after(fwd)}", caret: e.caret, anchor: e.caret}
+
+public define edit_clear() -> Edit:
+    Edit{content: "", caret: 0, anchor: 0}
+
+public define edit_empty(e: Edit) -> truth:
+    length(e.content) == 0
+
+# The caret is visible for the first half of every half-second. One place,
+# so every field in every app blinks together instead of each app inventing
+# its own rhythm.
+public define caret_lit(seconds: number) -> truth:
+    (seconds * 2.0 - to_real(to_whole(seconds * 2.0))) < 0.5
+
+# --- selection -------------------------------------------------------------
+# Caret and anchor are the two ends; which is which depends on the direction
+# you dragged, so everything below works off the ordered pair.
+
+public define edit_has_selection(e: Edit) -> truth:
+    e.caret != e.anchor
+
+define sel_from(e: Edit) -> int:
+    if e.caret < e.anchor then e.caret else e.anchor
+
+define sel_to(e: Edit) -> int:
+    if e.caret > e.anchor then e.caret else e.anchor
+
+# The line in three parts: what is left of the selection, the selection,
+# and what is right of it. Draw them in a row with the middle one plated
+# and the selection lands exactly where it is, measured.
+public define edit_left_of(e: Edit) -> text:
+    b = bytes_of(e.content)
+    text_of(bytes_part(b, 0, clamp_at(sel_from(e), bytes_count(b))))
+
+public define edit_selected(e: Edit) -> text:
+    b = bytes_of(e.content)
+    n = bytes_count(b)
+    text_of(bytes_part(b, clamp_at(sel_from(e), n), clamp_at(sel_to(e), n)))
+
+public define edit_right_of(e: Edit) -> text:
+    b = bytes_of(e.content)
+    n = bytes_count(b)
+    text_of(bytes_part(b, clamp_at(sel_to(e), n), n))
+
+# Take the selection out and leave the caret where it was. Nothing selected
+# means nothing happens, which is what makes this safe to call first from
+# every edit that has to replace what is there.
+public define edit_drop(e: Edit) -> Edit:
+    if not edit_has_selection(e):
+        return e
+    at_i = sel_from(e)
+    Edit{content: "{edit_left_of(e)}{edit_right_of(e)}", caret: at_i, anchor: at_i}
+
+public define edit_all(e: Edit) -> Edit:
+    Edit{content: e.content, caret: bytes_count(bytes_of(e.content)), anchor: 0}
+
+# Put the caret at a byte offset, dropping any selection. What a click does.
+public define edit_put(e: Edit, at_i: int) -> Edit:
+    moved(e, clamp_at(at_i, bytes_count(bytes_of(e.content))))
+
+# Move the caret and KEEP the anchor. What a drag, and shift-arrow, do.
+public define edit_reach(e: Edit, at_i: int) -> Edit:
+    Edit{content: e.content, caret: clamp_at(at_i, bytes_count(bytes_of(e.content))), anchor: e.anchor}
+
+# The word around the caret, selected. What a double click does.
+define is_space(c: int) -> truth = c == 32 or c == 9
+
+public define edit_word(e: Edit) -> Edit:
+    b = bytes_of(e.content)
+    n = bytes_count(b)
+    edit lo = clamp_at(e.caret, n)
+    loop:
+        if lo <= 0 or is_space(byte_at(b, lo - 1)):
+            break
+        lo = lo - 1
+    edit hi = clamp_at(e.caret, n)
+    loop:
+        if hi >= n or is_space(byte_at(b, hi)):
+            break
+        hi = hi + 1
+    Edit{content: e.content, caret: hi, anchor: lo}
+
+# Paste replaces the selection, like typing does.
+public define edit_paste(e: Edit, t: text) -> Edit:
+    flat = edit_drop(e)
+    at_i = flat.caret + bytes_count(bytes_of(t))
+    Edit{content: "{edit_before(flat)}{t}{edit_after(flat)}", caret: at_i, anchor: at_i}

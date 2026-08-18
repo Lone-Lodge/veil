@@ -5,6 +5,7 @@
 # resolver. The 656-line Rust crate collapses to this shape.
 
 use veil_role
+use text
 
 public type NodeProp: key: text, content: text
 public type Node: role: Role, props: [NodeProp], children: [int]
@@ -29,3 +30,18 @@ public define doc_speaks(doc: SemanticDocument, name: text) -> truth:
 
 public define empty_doc() -> SemanticDocument:
     SemanticDocument{root: 0, nodes: []}
+
+# --- has anything changed? -------------------------------------------------
+# There was a doc_mark here: a fingerprint over every role, prop and child,
+# compared frame to frame so an identical screen could skip resolving.
+#
+# It was four times SLOWER than the work it was avoiding. Walking every
+# byte of every prop of a few hundred nodes in Orion costs more than
+# measuring the text and handing the sprites over, and the gallery went
+# from 13% of a core to 61%. Measured, not guessed, which is the only
+# reason it is gone rather than tuned.
+#
+# What actually works is far simpler and is what every immediate-mode UI
+# does: draw when there is INPUT or something is ANIMATING, and idle
+# otherwise. Both are things the app already knows without being asked -
+# no hashing, no dirty flags to forget to set.
