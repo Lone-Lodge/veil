@@ -1,239 +1,287 @@
-# web_demo — a real game inventory screen, drawn as a Veil DisplayList
-# and streamed to the browser (thin client). Icons travel as NAMES
-# ("sword", "shield") — the backend picks the glyph; keeps non-ASCII
-# out of Orion source (the interp lexer mangles multi-byte UTF-8).
+# web_demo — the whole gallery, in a browser.
 #
-# Run from this directory:  orbit run src/main.or main
-# Then open:                http://localhost:7800
+# This is the honest test of the platform claim. The document is the SAME
+# document the native app builds (veil_gallery), laid out by the SAME
+# resolver, measured with the SAME font file. Nothing here knows about a
+# window, a GPU or a DOM: it turns a DisplayList into JSON and serves it,
+# and the browser turns that JSON into pixels.
+#
+# If the seam were incomplete - if it quietly dropped shadows, corners or
+# clipping - this would render a visibly different program, which is
+# exactly why it is worth having.
+#
+# The transport is plain HTTP on purpose. A websocket would be fewer
+# round trips and not one line more convincing.
+#
+#   GET /              the page
+#   GET /font.b64      the face the layout was measured with
+#   GET /frame?...     the display list, as JSON
+#
+#   Run from this directory:  orbit run
+#   Then open:                http://localhost:7800
 
 use ori_geometry
-use veil_role
+use ori_display
 use veil_document
 use veil_theme
 use veil_resolver
 use veil_web
-use atlas_ws
-use io
+use veil_gallery
+use veil_edit
+use veil_measure
+use typeface
+use os
 use net
-use json
 use time
-use string
+use text
+use encoding
 
-# ----- item catalog: [icon, name, rarity, count, desc line 1, desc line 2, stat] -----
+define view_w() -> int = 1040
+define view_h() -> int = 720
 
-define item(i: int) -> [text]:
-    if i == 0:
-        return ["sword", "Duskfang", "legendary", "", "A blade quenched in the last", "light of a dying star.", "ATK +48"]
-    if i == 1:
-        return ["shield", "Wardbreaker Aegis", "epic", "", "Shrugs off blows that would", "fell a lesser bearer.", "DEF +31"]
-    if i == 2:
-        return ["bow", "Whisperwind Bow", "rare", "", "Arrows loosed in silence", "strike twice as deep.", "ATK +19"]
-    if i == 3:
-        return ["potion", "Greater Healing Draught", "uncommon", "x7", "Restores 250 vitality over", "8 seconds.", "HEAL 250"]
-    if i == 4:
-        return ["ring", "Signet of the Deep", "epic", "", "The sea remembers those", "who wear its mark.", "MANA +24"]
-    if i == 5:
-        return ["orb", "Orb of Second Sight", "rare", "", "Reveals what walls and", "shadows try to hide.", "INT +12"]
-    if i == 6:
-        return ["scroll", "Scroll of Recall", "uncommon", "x3", "Returns you to the last", "sanctum you attuned.", "UTILITY"]
-    if i == 7:
-        return ["key", "Gilded Vault Key", "rare", "x2", "Opens gilded strongboxes", "found in the Underreach.", "KEY"]
-    if i == 8:
-        return ["pickaxe", "Ironbite Pickaxe", "common", "", "Reliable. Unremarkable.", "Gets the ore out.", "TOOL"]
-    if i == 9:
-        return ["meat", "Traveler's Ration", "common", "x12", "Restores 40 stamina.", "Tastes of long roads.", "STAM +40"]
-    if i == 10:
-        return ["gem", "Flawless Voidgem", "legendary", "", "It hums when held near", "things that should not be.", "SOCKET"]
-    if i == 11:
-        return ["thread", "Spidersilk Bundle", "uncommon", "x24", "Crafting material prized", "by shadowweavers.", "MATERIAL"]
-    []
+define box() -> Rect:
+    Rect{x: 0.0, y: 0.0, wide: to_real(view_w()), high: to_real(view_h())}
 
-define rarity_color(rarity: text) -> text:
-    if rarity == "legendary":
-        return "#e8a33d"
-    if rarity == "epic":
-        return "#a55fe8"
-    if rarity == "rare":
-        return "#3d8fe8"
-    if rarity == "uncommon":
-        return "#3dbf6e"
-    "#565068"
+# Everything the gallery needs to draw itself. The native app carries the
+# same fields; here only the few this demo actually moves are alive, and
+# the rest are the values the app starts with.
+# The gallery as the server starts it. After that it is whatever the last
+# press made it - the SAME press chain the native app runs, so a browser and
+# a window cannot answer differently.
+define fresh_screen() -> Gallery:
+    Gallery{win_w: view_w(), win_h: view_h(), seconds: 0.0, hover: "", focus: "", show_focus: false, tab: "kontroller", scroll: 0, chosen: 0, before: "Skriv något långt här", picked: "", after: "", typing: false, dialog: false, lit: false, menu: "", menu_x: 0, menu_y: 0, picked_item: "", open: "", drawer: false, zoom: 100, page: 0, dock_w: 260, dock_h: 120, dock_plan: "Utforskare|Sök/Konsol|Problem", dock_pick: "Utforskare|Konsol", dock_ws: "260", carrying: "", carry_x: 0, carry_y: 0, over: "", grabbed: "", moved: "", sort_by: "namn", sort_up: true, table_at: 0, contrast: false, bright: false, tip: "", notes: "", boxes: false, note: "Flera rader.", note_at: 0, note_to: 0, noting: false, slider: 35, volume: 70, sfx: 45, vsync: true, subs: false, quality: "Mellan", steps: 1, screen: "1920 x 1080", card: 0, slot: 0, bind: "", key_fwd: "W", key_jump: "Space"}
 
-define rarity_glow(rarity: text) -> text:
-    if rarity == "legendary":
-        return "rgba(232,163,61,0.30)"
-    if rarity == "epic":
-        return "rgba(165,95,232,0.30)"
-    if rarity == "rare":
-        return "rgba(61,143,232,0.30)"
-    if rarity == "uncommon":
-        return "rgba(61,191,110,0.30)"
-    "rgba(120,120,140,0.22)"
+# The two things a frame changes that a press does not: what the pointer is
+# over, and how far the page has been scrolled. Everything else the shared
+# press chain owns.
+# What is in the field, and where the caret and the mark sit in it.
+define typed_into(g: Gallery, line: Edit) -> Gallery:
+    Gallery{win_w: g.win_w, win_h: g.win_h, seconds: g.seconds, hover: g.hover, focus: g.focus, show_focus: g.show_focus, tab: g.tab, scroll: g.scroll, chosen: g.chosen, before: edit_left_of(line), picked: edit_selected(line), after: edit_right_of(line), typing: g.typing, dialog: g.dialog, lit: g.lit, menu: g.menu, menu_x: g.menu_x, menu_y: g.menu_y, picked_item: g.picked_item, open: g.open, drawer: g.drawer, zoom: g.zoom, page: g.page, dock_w: g.dock_w, dock_h: g.dock_h, dock_plan: g.dock_plan, dock_pick: g.dock_pick, dock_ws: g.dock_ws, carrying: g.carrying, carry_x: g.carry_x, carry_y: g.carry_y, over: g.over, grabbed: g.grabbed, moved: g.moved, sort_by: g.sort_by, sort_up: g.sort_up, table_at: g.table_at, contrast: g.contrast, bright: g.bright, tip: g.tip, notes: g.notes, boxes: g.boxes, note: g.note, note_at: g.note_at, note_to: g.note_to, noting: g.noting, slider: g.slider, volume: g.volume, sfx: g.sfx, vsync: g.vsync, subs: g.subs, quality: g.quality, steps: g.steps, screen: g.screen, card: g.card, slot: g.slot, bind: g.bind, key_fwd: g.key_fwd, key_jump: g.key_jump}
 
-# ----- grid geometry (shared by render and hit-test — one truth) -----
+define after_at(whole: text, from: int) -> text:
+    b = bytes_of(whole)
+    n = bytes_count(b)
+    cut = if from > n then n else from
+    text_of(bytes_part(b, cut, n))
 
-define grid_x() -> int: 48
-define grid_y() -> int: 96
-define slot_size() -> int: 64
-define slot_pitch() -> int: 76
-define grid_cols() -> int: 6
-define grid_rows() -> int: 4
+define looking(g: Gallery, hover: text, page: int, at_second: number) -> Gallery:
+    Gallery{win_w: g.win_w, win_h: g.win_h, seconds: at_second, hover: hover, focus: g.focus, show_focus: g.show_focus, tab: g.tab, scroll: g.scroll, chosen: g.chosen, before: g.before, picked: g.picked, after: g.after, typing: g.typing, dialog: g.dialog, lit: g.lit, menu: g.menu, menu_x: g.menu_x, menu_y: g.menu_y, picked_item: g.picked_item, open: g.open, drawer: g.drawer, zoom: g.zoom, page: page, dock_w: g.dock_w, dock_h: g.dock_h, dock_plan: g.dock_plan, dock_pick: g.dock_pick, dock_ws: g.dock_ws, carrying: g.carrying, carry_x: g.carry_x, carry_y: g.carry_y, over: g.over, grabbed: g.grabbed, moved: g.moved, sort_by: g.sort_by, sort_up: g.sort_up, table_at: g.table_at, contrast: g.contrast, bright: g.bright, tip: g.tip, notes: g.notes, boxes: g.boxes, note: g.note, note_at: g.note_at, note_to: g.note_to, noting: g.noting, slider: g.slider, volume: g.volume, sfx: g.sfx, vsync: g.vsync, subs: g.subs, quality: g.quality, steps: g.steps, screen: g.screen, card: g.card, slot: g.slot, bind: g.bind, key_fwd: g.key_fwd, key_jump: g.key_jump}
 
-# ----- scene -----
+# --- reading the request ----------------------------------------------------
+# A GET line is "GET /frame?what=move&x=12&y=40 HTTP/1.1". Everything this
+# server needs is in it, so nothing has to parse a body.
 
-define rect_at(x: int, y: int, w: int, h: int, colour: text) -> DrawCmd:
-    DrawRect(Rect{x: x, y: y, wide: w, high: h}, colour, 0)
+define first_line(req: text) -> text:
+    ls = lines(req)
+    if length(ls) == 0 then "" else at(ls, 0)
 
-define text_at(x: int, y: int, content: text, colour: text, size: int) -> DrawCmd:
-    DrawText(Point{x: x, y: y}, content, colour, size, 0)
+define wanted_path(req: text) -> text:
+    parts = split(first_line(req), " ")
+    if length(parts) < 2 then "/" else at(parts, 1)
 
-define icon_at(x: int, y: int, icon: text, size: int) -> DrawCmd:
-    DrawIcon(Point{x: x, y: y}, icon, size, 0)
+# The value of one query field, "" when it is not there.
+define field(path: text, key: text) -> text:
+    q = split(path, "?")
+    if length(q) < 2:
+        return ""
+    edit found = ""
+    loop pair in split(at(q, 1), "&"):
+        kv = split(pair, "=")
+        if length(kv) == 2 and at(kv, 0) is key:
+            found = at(kv, 1)
+    found
 
-define draw_header(list0: DisplayList) -> DisplayList:
-    edit list = list0
-    list = push_cmd(list, text_at(48, 26, "CHARACTER", "#6f6590", 14))
-    list = push_cmd(list, text_at(178, 26, "INVENTORY", "#e8c86a", 14))
-    list = push_cmd(list, rect_at(178, 46, 84, 2, "#e8c86a"))
-    list = push_cmd(list, text_at(308, 26, "SKILLS", "#6f6590", 14))
-    list = push_cmd(list, text_at(398, 26, "MAP", "#6f6590", 14))
-    list = push_cmd(list, icon_at(650, 24, "coin", 16))
-    list = push_cmd(list, text_at(676, 26, "2,164", "#e8c86a", 14))
-    list = push_cmd(list, rect_at(40, 64, 720, 1, "rgba(150,120,220,0.25)"))
-    list
+define number_of(t: text) -> int:
+    b = bytes_of(t)
+    n = bytes_count(b)
+    edit acc = 0
+    edit neg = false
+    loop i in 0..<n:
+        c = byte_at(b, i)
+        if c == 45 and i == 0:
+            neg = true
+        if c >= 48 and c <= 57:
+            acc = acc * 10 + (c - 48)
+    if neg then 0 - acc else acc
 
-define draw_slot(list0: DisplayList, index: int, selected: int) -> DisplayList:
-    edit list = list0
-    col = index % grid_cols()
-    row = index // grid_cols()
-    x = grid_x() + col * slot_pitch()
-    y = grid_y() + row * slot_pitch()
-    fields = item(index)
-    filled = length(fields) > 0
-    edit frame_colour = "#2a2140"
-    edit fill_colour = "#151022"
-    if filled:
-        frame_colour = rarity_color(at(fields, 2))
-        fill_colour = "#1d1433"
-    s = slot_size()
-    if index == selected and filled:
-        glow = rarity_glow(at(fields, 2))
-        list = push_cmd(list, rect_at(x - 5, y - 5, s + 10, s + 10, glow))
-    list = push_cmd(list, rect_at(x - 2, y - 2, s + 4, s + 4, frame_colour))
-    list = push_cmd(list, rect_at(x, y, s, s, fill_colour))
-    if filled:
-        list = push_cmd(list, icon_at(x + 13, y + 11, at(fields, 0), 36))
-        count = at(fields, 3)
-        if count != "":
-            list = push_cmd(list, text_at(x + 36, y + 47, count, "#cbd5e1", 12))
-    list
+define starts_with(t: text, head: text) -> truth:
+    b = bytes_of(t)
+    h = bytes_of(head)
+    if bytes_count(h) > bytes_count(b):
+        return false
+    text_of(bytes_part(b, 0, bytes_count(h))) is head
 
-define draw_detail(list0: DisplayList, selected: int) -> DisplayList:
-    edit list = list0
-    px = 528
-    py = 96
-    pw = 232
-    ph = 292
-    list = push_cmd(list, rect_at(px - 1, py - 1, pw + 2, ph + 2, "#3a2a5e"))
-    list = push_cmd(list, rect_at(px, py, pw, ph, "rgba(22,14,40,0.96)"))
-    fields = item(selected)
-    if length(fields) == 0:
-        list = push_cmd(list, text_at(px + 20, py + 130, "Select an item", "#6f6590", 13))
-        return list
-    rarity = at(fields, 2)
-    rcolour = rarity_color(rarity)
-    list = push_cmd(list, rect_at(px + 20, py + 18, 56, 56, "#151022"))
-    list = push_cmd(list, rect_at(px + 20, py + 18, 56, 3, rcolour))
-    list = push_cmd(list, icon_at(px + 30, py + 28, at(fields, 0), 34))
-    list = push_cmd(list, text_at(px + 20, py + 92, at(fields, 1), rcolour, 16))
-    list = push_cmd(list, text_at(px + 20, py + 116, rarity, rcolour, 11))
-    list = push_cmd(list, rect_at(px + 20, py + 138, pw - 40, 1, "rgba(150,120,220,0.25)"))
-    list = push_cmd(list, text_at(px + 20, py + 154, at(fields, 4), "#a99fc0", 12))
-    list = push_cmd(list, text_at(px + 20, py + 172, at(fields, 5), "#a99fc0", 12))
-    list = push_cmd(list, text_at(px + 20, py + 206, at(fields, 6), "#e0e6f0", 14))
-    list = push_cmd(list, rect_at(px + 20, py + 240, pw - 40, 30, "#241940"))
-    list = push_cmd(list, text_at(px + 78, py + 248, "EQUIP", "#e8c86a", 13))
-    list
+define after(t: text, from: int) -> text:
+    b = bytes_of(t)
+    n = bytes_count(b)
+    cut = if from > n then n else from
+    text_of(bytes_part(b, cut, n))
 
-define frame(selected: int, note: text) -> text:
-    edit list = empty_list()
-    list = push_cmd(list, rect_at(0, 0, 800, 600, "#0d0716"))
-    list = push_cmd(list, rect_at(0, 0, 800, 180, "rgba(120,60,200,0.05)"))
-    list = push_cmd(list, rect_at(0, 420, 800, 180, "rgba(30,10,60,0.35)"))
-    list = draw_header(list)
-    total = grid_cols() * grid_rows()
-    loop i in 0..<total:
-        list = draw_slot(list, i, selected)
-    list = draw_detail(list, selected)
-    list = push_cmd(list, rect_at(40, 556, 720, 1, "rgba(150,120,220,0.25)"))
-    list = push_cmd(list, text_at(48, 570, note, "#6f6590", 12))
-    list = push_cmd(list, text_at(560, 570, "every pixel = Veil DisplayList", "#463d60", 11))
-    display_list_json(list)
+define last_part(whole: text) -> text:
+    parts = split(whole, ":")
+    if length(parts) == 0 then whole else at(parts, length(parts) - 1)
 
-# ----- hit-testing (same numbers the renderer used) -----
-
-define slot_from_click(x: int, y: int) -> int:
-    gx = x - grid_x()
-    gy = y - grid_y()
-    if gx < 0 or gy < 0:
+# Which tab a name like "tab:docka" asks for, or -1 for none.
+define tab_wanted(name: text) -> int:
+    if not starts_with(name, "tab:"):
         return 0 - 1
-    col = gx // slot_pitch()
-    row = gy // slot_pitch()
-    if col >= grid_cols() or row >= grid_rows():
-        return 0 - 1
-    if gx % slot_pitch() >= slot_size() or gy % slot_pitch() >= slot_size():
-        return 0 - 1
-    row * grid_cols() + col
+    want = after(name, 4)
+    edit found = 0 - 1
+    edit i = 0
+    loop t in tab_names():
+        if t is want:
+            found = i
+        i = i + 1
+    found
+
+# The answer, on a connection that stays open.
+#
+# This is the whole of what "laggy on the web" was. The server answered in
+# six milliseconds and the browser saw two hundred, because closing after
+# every answer made it open a NEW TCP connection for every single frame -
+# and on a local machine handing out and reclaiming a port that fast costs
+# fifty to two hundred and fifty milliseconds of connect time. Six of
+# render, two hundred and fifty of handshake.
+#
+# Keeping it open needs Content-Length: without it the only way a browser
+# can know the body ended is the connection closing, which is exactly the
+# thing being avoided.
+define reply(conn: int, kind: text, body: text):
+    size = bytes_count(bytes_of(body))
+    tcp_send(conn, "HTTP/1.1 200 OK\r\nContent-Type: {kind}\r\nContent-Length: {size}\r\nCache-Control: no-store\r\nConnection: keep-alive\r\n\r\n" + body)
 
 define main() -> int:
-    page = read_file("index.html")
-    http_server = tcp_listen(7800)
-    ws_server = ws_listen(7799)
-    print_line("veil inventory demo")
+    face = font_body()
+    edit dress = gallery_theme()
+
+    # The very font the layout was measured with, served by the same
+    # process on its own path. It is the subset the resolver itself loads,
+    # nine kilobytes, and the page builds a face out of it before it paints
+    # anything - a painter drawing in a face nobody measured paints a
+    # different program however right its rectangles are.
+    font_b64 = base64_encode(bytes_of(embed "../../../../orion/orbs/typeface/assets/Inter-Regular.subset.ttf"))
+
+    server = tcp_listen(7800)
+    print_line("veil gallery, in a browser")
     print_line("  page: http://localhost:7800")
 
-    edit clients = []
-    edit selected = 0
-    edit note = "Click a slot to inspect it"
-    edit last_sent = ""
+    edit now = fresh_screen()
+    edit hover = ""
+    edit at_page = 0
+    edit began = monotonic_ms()
+    # What the pointer has hold of, and what it was when it took hold. A
+    # drag is nothing but a name plus how far the pointer has come since.
+    edit held = ""
+    edit grab_x = 0
+    edit grab_y = 0
+    edit grab_w = 0
+    edit line = edit_new("Skriv något långt här")
+
+    edit said_once = false
+    # Connections that are open and may ask again. A browser keeps a
+    # handful and reuses them, so this list stays small.
+    edit live = []
+    # The last layout, and what it was laid out for.
+    # The frame before. Everything the next one can reuse hangs off it.
+    edit was_frame = first_frame(SemanticDocument{root: 0, nodes: []}, dress, face, box())
 
     loop:
-        conn = tcp_accept(http_server)
-        if conn >= 0:
-            _req = tcp_recv(conn, 8192)
-            response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n" + page
-            tcp_send(conn, response)
-            tcp_close(conn)
-
-        fresh = ws_accept(ws_server)
+        # Accept with a deadline, not a block. A blocking accept parks the
+        # whole server on the NEXT connection, so it can never come back to
+        # a connection it already has and read the next request on it -
+        # which is what keeping them open is for.
+        #
+        # The deadline also PACES the loop, so nothing else has to. A
+        # sleep would not do: sleeping is a 15.6 ms tick on this machine
+        # and it showed up as exactly that in the browser - eleven to
+        # fourteen milliseconds to first byte for an answer that cost
+        # nothing to produce. A wait on a socket is a real wait.
+        fresh = tcp_accept_wait(server, 1)
         if fresh >= 0:
-            clients = append(clients, fresh)
-            last_sent = ""
+            live = append(live, fresh)
+        edit still = []
+        edit busy = false
+        loop conn in live:
+            # Nothing waiting on this one: leave it open and move on. A
+            # blocking read here would park the whole server on whichever
+            # connection happened to be quiet.
+            if not readable_within(conn, 0):
+                still = append(still, conn)
+                continue
+            req = tcp_recv(conn, 8192)
+            if req is "":
+                _gone = tcp_close(conn)
+                continue
+            busy = true
+            still = append(still, conn)
+            path = wanted_path(req)
+            if starts_with(path, "/font.b64"):
+                reply(conn, "text/plain", font_b64)
+            else if starts_with(path, "/frame"):
+                what = field(path, "what")
+                mx = number_of(field(path, "x"))
+                my = number_of(field(path, "y"))
+                was_hover = hover
+                was_page = at_page
+                # The seconds a screen has been up: what everything that
+                # moves is told from. Without a clock the cooldown never
+                # cools and the drawer never slides.
+                doc = gallery_doc(looking(now, hover, at_page, to_real(monotonic_ms() - began) / 1000.0))
+                edit here = if said_once then next_frame(was_frame, doc, dress, face, box()) else first_frame(doc, dress, face, box())
 
-        n = length(clients)
-        loop i in 0..<n:
-            msg = ws_recv_text(at(clients, i))
-            if msg != "":
-                parsed = json_parse(msg)
-                mx = get_int(parsed, "x")
-                my = get_int(parsed, "y")
-                hit = slot_from_click(mx, my)
-                if hit >= 0:
-                    fields = item(hit)
-                    if length(fields) > 0:
-                        selected = hit
-                        name = at(fields, 1)
-                        note = "Inspecting: {name}"
-                    if length(fields) == 0:
-                        note = "Empty slot"
-                if hit < 0:
-                    if my < 60:
-                        note = "Only INVENTORY is wired in this demo"
+                if what is "wheel":
+                    step = if my > 0 then 80 else 0 - 80
+                    want = at_page + step
+                    at_page = if want < 0 then 0 else want
+                if what is "move":
+                    hover = pick_placed(doc, dress, here.placed, mx, my)
+                if what is "down":
+                    on = pick_placed(doc, dress, here.placed, mx, my)
+                    hover = on
+                    # The SAME press chain the native app runs.
+                    now = pressed(now, on)
+                    # The palette is a theme, so it is rebuilt when it
+                    # changes - the roles are the same, only the values move.
+                    if on is "bright" or on is "contrast":
+                        dress = gallery_theme()
+                    # A slider and a grip are things you take HOLD of, and
+                    # where the pointer was is half of what a drag means.
+                    if on is "slider" or on is "vol" or on is "sfx" or starts_with(on, "grip:"):
+                        held = on
+                        grab_x = mx
+                        grab_y = my
+                        grab_w = if on is "grip:y" then now.dock_h else width_of(now, number_in(after_at(on, 7)), false)
+                    if on is "field":
+                        line = edit_put(line, caret_at(line.content, 14, face, mx - to_whole(rect_of(doc, here.placed, "field").x) - 12))
+                if what is "up":
+                    held = ""
+                # The pointer moved with the button still down. What that
+                # MEANS is the orb's business; where it is, is ours.
+                if what is "drag" and held is not "":
+                    now = dragged(now, held, share_at(rect_of(doc, here.placed, held), mx), mx - grab_x, my - grab_y, grab_w)
+                # A key belongs to whatever is being typed into. One handler
+                # owns the twenty editing keys; copy, cut and paste are not
+                # here because a clipboard is a platform.
+                if what is "char" and now.typing:
+                    line = edit_type(line, number_of(field(path, "code")))
+                if what is "key" and now.typing:
+                    line = edit_key(line, number_of(field(path, "code")), field(path, "ctrl") is "1", field(path, "shift") is "1", false)
+                now = typed_into(now, line)
+                moved_on = hover is not was_hover or at_page != was_page or what is "down" or what is "drag" or what is "char" or what is "key" or what is "up"
 
-        current = frame(selected, note)
-        if current != last_sent:
-            if length(clients) > 0:
-                clients = ws_broadcast_text(clients, current)
-                last_sent = current
-        sleep(0.03)
+                if what is "move" and said_once and not moved_on:
+                    was_frame = here
+                    reply(conn, "application/json", "\{\"same\":1\}")
+                else:
+                    if moved_on:
+                        here = next_frame(here, gallery_doc(looking(now, hover, at_page, to_real(monotonic_ms() - began) / 1000.0)), dress, face, box())
+                    was_frame = here
+                    reply(conn, "application/json", display_list_json(here.list))
+                    said_once = true
+            else:
+                # Read per request, not once at boot: editing the painter
+                # and reloading the tab is the whole loop for working on it.
+                reply(conn, "text/html; charset=utf-8", read_file("index.html"))
+        live = still
+
     0

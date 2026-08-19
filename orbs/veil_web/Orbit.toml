@@ -9,3 +9,4 @@ veil_resolver = "path:../veil_resolver"
 veil_theme = "path:../veil_theme"
 
 string = "*"
+text = "*"

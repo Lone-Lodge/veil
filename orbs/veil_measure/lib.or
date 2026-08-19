@@ -12,7 +12,43 @@ public type Measured: node_id: int, rect: Rect
 # from the font's own advance widths at `size_px`, height = the em box
 # (ascent + descent). Resolver, pick and painters all read THIS, so
 # the pixel measured and the pixel drawn come from one engine.
+# Measured once, then remembered.
+#
+# Walking a line costs about three hundred nanoseconds a character - a
+# codepoint decoded, a glyph found in the cmap, a kern looked up, an advance
+# read - and a screen asks for the SAME line over and over: once to size the
+# box, once to place it, once to draw it, and again for every ancestor that
+# needs to know how big its child is. A gallery of 161 boxes made 1611
+# measurements of a few hundred distinct lines, and that was the whole of its
+# layout time.
+#
+# The answer is two whole numbers, so it fits in one: width in the high half,
+# height in the low. Nothing here can be wider than 65535 pixels.
+define measured_key(content: text, size_px: int) -> text:
+    "tm:{size_px}:{content}"
+
 public define text_size(content: text, size_px: int, face: Font) -> Size:
+    # ONE lookup, not two. A slot nobody set answers 0 on every backend, so
+    # storing one MORE than the packed answer makes zero mean "never
+    # measured" - and asking `slot_has` first only to ask again hashed the
+    # same key twice for every one of the fifteen hundred measurements a
+    # screen makes.
+    memo = measured_key(content, size_px)
+    packed = slot_get_int(memo)
+    if packed > 0:
+        return Size{wide: to_real((packed - 1) // 65536), high: to_real((packed - 1) % 65536)}
+    fresh = text_size_slow(content, size_px, face)
+    # Two numbers in one only holds while both fit in half of it. Nothing on
+    # a screen is 65535 pixels wide, but a line CAN be - measured before it
+    # is wrapped or cut - and a packed answer that wrapped round would be
+    # worse than no answer at all, so that one is simply not remembered.
+    w = to_whole(fresh.wide)
+    h = to_whole(fresh.high)
+    if w < 65536 and h < 65536:
+        slot_set(memo, w * 65536 + h + 1)
+    fresh
+
+define text_size_slow(content: text, size_px: int, face: Font) -> Size:
     scale = to_real(size_px) / to_real(face.upm)
     letters = bytes_of(plain_of(content))
     n = bytes_count(letters)
@@ -135,16 +171,31 @@ public define trim_to(content: text, size_px: int, face: Font, max_w: int) -> te
     room = max_w - text_size(tail, size_px, face).wide
     if room <= 0:
         return tail
+    # ONE walk, carrying the width along. This used to measure the whole
+    # prefix again for every character - seventy measurements of a
+    # seventy-character row, each walking further than the last, so trimming
+    # one line cost the square of its length. A screen of eight such rows was
+    # a third of its own layout time.
+    scale = to_real(size_px) / to_real(face.upm)
     b = bytes_of(content)
     n = bytes_count(b)
+    edit run = 0.0
+    edit prev = 0
     edit cut = 0
     edit i = 0
     loop:
         if i >= n:
             break
         step = cp_step(b, i)
-        if text_size(text_of(bytes_part(b, 0, i + step)), size_px, face).wide > room:
+        g = glyph_id(face, cp_at(b, i))
+        edit wide = run
+        if prev > 0:
+            wide = wide + to_real(kern_cached(face, prev, g)) * scale
+        wide = wide + to_real(advance_width(face, g)) * scale
+        if to_whole(wide + 0.5) > room:
             break
+        run = wide
+        prev = g
         i = i + step
         cut = i
     "{text_of(bytes_part(b, 0, cut))}{tail}"
@@ -251,8 +302,18 @@ public define caret_from(content: text, size_px: int, face: Font, max_w: int, px
     seen + caret_at(at(lines, row), size_px, face, px)
 
 # How tall that wrapped block is.
+# How tall that wrapped block is - remembered, because breaking a paragraph
+# walks every word in it and the answer is asked for three times a frame:
+# once to size the box, once to place it, once to draw it. Thirty of these a
+# screen, and each one was twenty-five word measurements.
 public define wrapped_high(content: text, size_px: int, face: Font, max_w: int) -> int:
-    length(wrap_text(content, size_px, face, max_w)) * line_high(size_px, face)
+    memo = "wh:{size_px}:{max_w}:{content}"
+    seen = slot_get_int(memo)
+    if seen > 0:
+        return seen - 1
+    tall = length(wrap_text(content, size_px, face, max_w)) * line_high(size_px, face)
+    slot_set(memo, tall + 1)
+    tall
 
 # Which byte offset in `content` a click at `x` pixels from its left edge
 # lands on. A click has to become a caret position, and the only honest way
@@ -293,9 +354,14 @@ public define caret_at(content: text, size_px: int, face: Font, x: int) -> int:
 # paragraph that reported its whole unbroken line made every ancestor
 # claim a width no one was going to give it.
 public define widest_word(content: text, size_px: int, face: Font) -> int:
+    memo = "ww:{size_px}:{content}"
+    seen = slot_get_int(memo)
+    if seen > 0:
+        return seen - 1
     edit widest = 0
     loop w in split(content, " "):
         wide = to_whole(text_size(w, size_px, face).wide)
         if wide > widest:
             widest = wide
+    slot_set(memo, widest + 1)
     widest

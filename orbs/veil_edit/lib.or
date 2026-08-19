@@ -322,3 +322,101 @@ public define edit_paste(e: Edit, t: text) -> Edit:
     flat = edit_drop(e)
     at_i = flat.caret + bytes_count(bytes_of(t))
     Edit{content: "{edit_before(flat)}{t}{edit_after(flat)}", caret: at_i, anchor: at_i}
+
+# --- word by word ----------------------------------------------------------
+# What ctrl and an arrow do. A word boundary is where a run of letters
+# meets anything that is not one - which puts the caret exactly where the
+# eye expects it and is the same rule punctuation follows.
+
+define is_word(c: int) -> truth:
+    not is_space(c) and c != 10 and c != 13
+
+public define edit_word_left(e: Edit) -> Edit:
+    b = bytes_of(e.content)
+    n = bytes_count(b)
+    edit i = clamp_at(e.caret, n)
+    loop:
+        if i <= 0 or is_word(byte_at(b, i - 1)):
+            break
+        i = i - 1
+    loop:
+        if i <= 0 or not is_word(byte_at(b, i - 1)):
+            break
+        i = i - 1
+    moved(e, i)
+
+# Forward lands on the START of the next word, backward on the start of
+# this one. That asymmetry is not an accident: it is what puts the caret
+# where your eye already is, and it is what every editor on this platform
+# does.
+public define edit_word_right(e: Edit) -> Edit:
+    b = bytes_of(e.content)
+    n = bytes_count(b)
+    edit i = clamp_at(e.caret, n)
+    loop:
+        if i >= n or not is_word(byte_at(b, i)):
+            break
+        i = i + 1
+    loop:
+        if i >= n or is_word(byte_at(b, i)):
+            break
+        i = i + 1
+    moved(e, i)
+
+# Ctrl and backspace: take back the word, not the letter. With something
+# selected it takes the selection, the way every other edit does.
+public define edit_erase_word(e: Edit) -> Edit:
+    if edit_has_selection(e):
+        return edit_drop(e)
+    to = edit_word_left(e)
+    b = bytes_of(e.content)
+    n = bytes_count(b)
+    keep_left = text_of(bytes_part(b, 0, clamp_at(to.caret, n)))
+    keep_right = text_of(bytes_part(b, clamp_at(e.caret, n), n))
+    Edit{content: "{keep_left}{keep_right}", caret: to.caret, anchor: to.caret}
+
+# --- one place that knows the keys -----------------------------------------
+# Every editor answers to the same twenty keys, and an app that writes them
+# out itself writes them out slightly differently in every field it has.
+# This is the whole of it, so a text field, a note and a code editor are
+# the same control told whether Enter breaks a line.
+#
+# Copy, cut and paste are deliberately NOT here. They need a clipboard, and
+# a clipboard is a platform - veil does not have one. An app wires those
+# three lines itself with `edit_selected`, `edit_drop` and `edit_paste`.
+#
+# `breaks` is false for a one-line field: Enter belongs to whatever the
+# field is inside, not to the field.
+
+define key_moves(key: int) -> truth:
+    key == 37 or key == 39 or key == 38 or key == 40 or key == 36 or key == 35
+
+public define edit_key(e: Edit, key: int, ctrl: truth, shift: truth, breaks: truth) -> Edit:
+    after = edit_pressed(e, key, ctrl, breaks)
+    # Shift holds the anchor, which is the whole difference between moving
+    # and selecting. Only movement can select; typing and erasing cannot.
+    if shift and key_moves(key) then edit_hold(e, after) else after
+
+define edit_pressed(e: Edit, key: int, ctrl: truth, breaks: truth) -> Edit:
+    if key == 37:
+        return if ctrl then edit_word_left(e) else edit_left(e)
+    if key == 39:
+        return if ctrl then edit_word_right(e) else edit_right(e)
+    if key == 38:
+        return edit_up(e)
+    if key == 40:
+        return edit_down(e)
+    if key == 36:
+        return if ctrl then edit_home(e) else edit_line_home(e)
+    if key == 35:
+        return if ctrl then edit_end(e) else edit_line_end(e)
+    if key == 8:
+        return if ctrl then edit_erase_word(e) else edit_erase(e)
+    if key == 46:
+        return edit_delete(e)
+    if key == 13:
+        return if breaks then edit_break(e) else e
+    # Ctrl+A. The one key with a letter on it that is not typing.
+    if key == 65 and ctrl:
+        return edit_all(e)
+    e

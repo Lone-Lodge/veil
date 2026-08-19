@@ -689,6 +689,66 @@ define main() -> int:
     check("a stated width survives a crowded row", 260, to_whole(at(sqm, 1).rect.wide))
     check("and the child that named none gives up the room", 740, to_whole(at(sqm, 3).rect.wide))
 
+    # One place knows the editing keys. A field, a note and a code editor
+    # are the same control told whether Enter breaks a line.
+    ke = edit_put(edit_new("hej du glada"), 0)
+    check("ctrl-right jumps a word", 4, edit_key(ke, 39, true, false, false).caret)
+    check("and ctrl-left comes back", 0, edit_key(edit_key(ke, 39, true, false, false), 37, true, false, false).caret)
+    ke2 = edit_put(edit_new("hej du glada"), 6)
+    check_text("ctrl-backspace takes the word", "hej  glada", edit_key(ke2, 8, true, false, false).content)
+    check_true("shift and an arrow select", edit_has_selection(edit_key(ke, 39, false, true, false)))
+    check_true("a plain arrow does not", not edit_has_selection(edit_key(ke, 39, false, false, false)))
+    check("a one-line field ignores Enter", 12, bytes_count(bytes_of(edit_key(ke, 13, false, false, false).content)))
+    check("and a note takes it", 13, bytes_count(bytes_of(edit_key(ke, 13, false, false, true).content)))
+
+    # A frame told from the one before must come out the SAME as one told
+    # from nothing. That is the whole contract: the framework may skip work,
+    # never answers.
+    frdoc = SemanticDocument{root: 0, nodes: [Node{role: role("bar"), props: [NodeProp{key: "w", content: "200"}, NodeProp{key: "layout", content: "column"}, NodeProp{key: "gap", content: "6"}], children: [1, 2]}, Node{role: role("blk"), props: [NodeProp{key: "text", content: "ett"}, NodeProp{key: "w", content: "80"}, NodeProp{key: "h", content: "20"}], children: []}, Node{role: role("blk"), props: [NodeProp{key: "text", content: "tva som bryts nagon gang"}, NodeProp{key: "wrap", content: "1"}, NodeProp{key: "fill", content: "1"}], children: []}]}
+    frbox = Rect{x: 0.0, y: 0.0, wide: 200.0, high: 200.0}
+    fr1 = first_frame(frdoc, p_th, face, frbox)
+    fr2 = next_frame(fr1, frdoc, p_th, face, frbox)
+    check("an unchanged frame draws the same", cmd_count(fr1.list), cmd_count(fr2.list))
+    check("and lays out the same", to_whole(at(fr1.placed, 2).rect.high), to_whole(at(fr2.placed, 2).rect.high))
+    # One node changed: the answer still matches a frame told from nothing.
+    frdoc2 = SemanticDocument{root: 0, nodes: [at(frdoc.nodes, 0), Node{role: role("blk"), props: [NodeProp{key: "text", content: "ett"}, NodeProp{key: "w", content: "140"}, NodeProp{key: "h", content: "20"}], children: []}, at(frdoc.nodes, 2)]}
+    fr3 = next_frame(fr2, frdoc2, p_th, face, frbox)
+    cold = first_frame(frdoc2, p_th, face, frbox)
+    check("a changed node moves what it should", to_whole(at(cold.placed, 1).rect.wide), to_whole(at(fr3.placed, 1).rect.wide))
+    check("and the rest lands where the cold frame put it", to_whole(at(cold.placed, 2).rect.y), to_whole(at(fr3.placed, 2).rect.y))
+    check("and draws the same number of things", cmd_count(cold.list), cmd_count(fr3.list))
+    # The strong form: not the same COUNT but the same commands, in order,
+    # with the same numbers in them. A frame told from the one before may
+    # skip work; it may not answer differently.
+    check_text("a told frame draws exactly what a cold one draws", display_list_json(cold.list), display_list_json(fr3.list))
+    check_text("and so does one where nothing changed", display_list_json(fr1.list), display_list_json(fr2.list))
+    # A new theme is a new screen. Everything a frame reuses was worked out
+    # under the old one, so it must not be reused under a different one.
+    other = Theme{rules: [StyleRule{role_name: "blk", padding: 9, gap: 0, fg_colour: "#ff0000ff", bg_colour: "#00ff00ff", direction: "column", radius: 3, size: 15, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}]}
+    fr4 = next_frame(fr2, frdoc, other, face, frbox)
+    check_text("a new theme is told from nothing", display_list_json(first_frame(frdoc, other, face, frbox).list), display_list_json(fr4.list))
+    # THREE frames in a row, each told from the last. Two was not enough to
+    # catch a copied branch handing on where its children USED to sit: the
+    # first copy is at the root and moves nothing, and the fault only shows
+    # when a later frame trusts the positions it was given.
+    frb = SemanticDocument{root: 0, nodes: [at(frdoc.nodes, 0), Node{role: role("blk"), props: [NodeProp{key: "text", content: "ett"}, NodeProp{key: "w", content: "90"}, NodeProp{key: "h", content: "20"}], children: []}, at(frdoc.nodes, 2)]}
+    ch1 = next_frame(first_frame(frdoc, p_th, face, frbox), frb, p_th, face, frbox)
+    ch2 = next_frame(ch1, frdoc, p_th, face, frbox)
+    ch3 = next_frame(ch2, frb, p_th, face, frbox)
+    check_text("three told frames still draw what a cold one draws", display_list_json(first_frame(frb, p_th, face, frbox).list), display_list_json(ch3.list))
+    # SCROLLING changes no size and no property anyone would call layout,
+    # and it moves everything. A frame told from the one before has to
+    # notice - which is why it asks whether boxes MOVED rather than which
+    # properties could have moved them.
+    roll_doc = SemanticDocument{root: 0, nodes: [Node{role: role("bar"), props: [NodeProp{key: "w", content: "120"}, NodeProp{key: "h", content: "60"}, NodeProp{key: "layout", content: "column"}, NodeProp{key: "clip", content: "1"}, NodeProp{key: "scroll_y", content: "0"}], children: [1, 2, 3]}, Node{role: role("blk"), props: [NodeProp{key: "w", content: "80"}, NodeProp{key: "h", content: "30"}], children: []}, Node{role: role("blk"), props: [NodeProp{key: "w", content: "80"}, NodeProp{key: "h", content: "30"}], children: []}, Node{role: role("blk"), props: [NodeProp{key: "w", content: "80"}, NodeProp{key: "h", content: "30"}], children: []}]}
+    roll_row = Node{role: role("blk"), props: [NodeProp{key: "w", content: "80"}, NodeProp{key: "h", content: "30"}], children: []}
+    roll_after = SemanticDocument{root: 0, nodes: [Node{role: role("bar"), props: [NodeProp{key: "w", content: "120"}, NodeProp{key: "h", content: "60"}, NodeProp{key: "layout", content: "column"}, NodeProp{key: "clip", content: "1"}, NodeProp{key: "scroll_y", content: "40"}], children: [1, 2, 3]}, roll_row, roll_row, roll_row]}
+    roll_box = Rect{x: 0.0, y: 0.0, wide: 120.0, high: 60.0}
+    roll1 = first_frame(roll_doc, p_th, face, roll_box)
+    roll2 = next_frame(roll1, roll_after, p_th, face, roll_box)
+    check_text("a told frame notices a scroll", display_list_json(first_frame(roll_after, p_th, face, roll_box).list), display_list_json(roll2.list))
+    check_true("and the rows actually moved", to_whole(at(roll2.placed, 1).rect.y) != to_whole(at(roll1.placed, 1).rect.y))
+
     # A node the pointer goes straight through, and everything in it.
     ppass = Node{role: role("blk"), props: [NodeProp{key: "pass", content: "1"}, NodeProp{key: "w", content: "80"}, NodeProp{key: "h", content: "40"}], children: []}
     punder = Node{role: role("blk"), props: [NodeProp{key: "do", content: "under"}, NodeProp{key: "w", content: "80"}, NodeProp{key: "h", content: "40"}], children: []}

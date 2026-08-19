@@ -11,23 +11,21 @@ use veil_document
 use veil_resolver
 use veil_theme
 use typeface
+use text
 # Serialise a resolved DisplayList to the fixed JSON contract:
 #   {"commands":[{"kind":"rect","x":..,"y":..,"w":..,"h":..,"color":".."},
 #                {"kind":"text","x":..,"y":..,"text":"..","color":".."}]}
-# A `first` flag joins pieces with commas without a leading one — no slice
-# needed (the text orb has no substring, and this reads clearer anyway).
+# The pieces are collected and joined ONCE. Adding each one to the end of a
+# growing text copies everything already written, so a hundred and fifty
+# commands copied about a megabyte to produce fourteen kilobytes - the cost
+# grew with the square of how many there were.
 public define display_list_json(list: DisplayList) -> text:
-    edit body = ""
-    edit first = true
+    edit pieces = []
     loop cmd in list.commands:
         piece = cmd_json(cmd)
         if piece != "":
-            if first:
-                body = piece
-                first = false
-            else:
-                body = body + "," + piece
-    "\{\"commands\":[" + body + "]\}"
+            pieces = append(pieces, piece)
+    "\{\"commands\":[" + join(pieces, ",") + "]\}"
 
 # Every command the display list can carry, said in JSON. What the web
 # side does with them is its business, but nothing may be silently

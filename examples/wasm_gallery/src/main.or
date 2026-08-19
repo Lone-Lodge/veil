@@ -1,0 +1,37 @@
+# How fast the whole gallery resolves with no server in the way.
+#
+# The same document the native app builds and the same resolver, compiled
+# to wasm and called in a loop. What it answers is the number of draw
+# commands; what it is FOR is the milliseconds around it.
+
+use ori_geometry
+use ori_display
+use veil_document
+use veil_role
+use veil_theme
+use veil_resolver
+use veil_gallery
+use typeface
+
+define view_w() -> int = 1040
+define view_h() -> int = 720
+
+define box() -> Rect:
+    Rect{x: 0.0, y: 0.0, wide: to_real(view_w()), high: to_real(view_h())}
+
+define screen(tab: text, hover: text, page: int, pick: text) -> Gallery:
+    Gallery{win_w: view_w(), win_h: view_h(), seconds: 0.0, hover: hover, focus: "", show_focus: false, tab: tab, scroll: 0, chosen: 0, before: "Skriv något långt här", picked: "", after: "", typing: false, dialog: false, lit: false, menu: "", menu_x: 0, menu_y: 0, picked_item: "", open: "", drawer: false, zoom: 100, page: page, dock_w: 260, dock_h: 120, dock_plan: "Utforskare|Sök/Konsol|Problem", dock_pick: pick, dock_ws: "260", carrying: "", carry_x: 0, carry_y: 0, over: "", grabbed: "", moved: "", sort_by: "namn", sort_up: true, table_at: 0, contrast: false, bright: false, tip: "", notes: "", boxes: false, note: "Flera rader.", note_at: 0, note_to: 0, noting: false, slider: 35, volume: 70, sfx: 45, vsync: true, subs: false, quality: "Mellan", steps: 1, screen: "1920 x 1080", card: 0, slot: 0, bind: "", key_fwd: "W", key_jump: "Space"}
+
+# A full resolve: build the document, lay it out, paint it.
+define main() -> int:
+    face = font_body()
+    dress = gallery_theme()
+    g = screen("kontroller", "", 0, "Utforskare|Konsol")
+    list = resolve_in(gallery_doc(g), dress, face, box())
+    length(list.commands)
+
+# NOTE: there is no repaint-only entry point here, and that is the finding.
+# A wasm module cannot hold a `[Measured]` between calls - Orion has no
+# globals but the slot store, and that lives on the host. So a UI in a page
+# wants ONE entry point that takes the state and answers with the display
+# list, keeping its caches in slots exactly the way the native app does.

@@ -2,67 +2,368 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Veil — browser thin client</title>
+<title>Veil — samma dokument, i en webbläsare</title>
 <style>
-  body { margin: 0; font: 13px monospace; background: #0b1220; color: #94a3b8;
-         display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px; }
-  canvas { background: #f1f5f9; border-radius: 8px; cursor: pointer; }
-  #status { min-height: 1em; }
+  /* The page itself is deliberately almost nothing. Everything you see
+     inside the canvas is a Veil DisplayList: no DOM, no widget classes,
+     no CSS doing layout. The point of this file is to prove the seam is
+     COMPLETE - that a browser given the display list can draw the same
+     program the native renderer draws. */
+  /* The face is fetched as base64 and built in script - see below. A
+     @font-face with a data: URI is refused outright by some browsers, and
+     a painter drawing in a face nobody measured paints a different
+     program however right its rectangles are. */
+  html, body { margin: 0; height: 100%; background: #0b0b0b; color: #8a8a8a;
+               font: 12px "VeilBody", system-ui, sans-serif; }
+  body { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px; box-sizing: border-box; }
+  canvas { border-radius: 8px; cursor: default; touch-action: none; }
+  #status { min-height: 1.2em; }
+  #note { color: #5a5a5a; font-size: 11px; }
+  b { color: #e0b04a; font-weight: normal; }
 </style>
 </head>
 <body>
-<div id="status">connecting…</div>
-<canvas id="cv" width="800" height="600"></canvas>
+<div id="status">ansluter…</div>
+<canvas id="cv" width="1040" height="720"></canvas>
+<div id="note">Bilder och nine-slice ritas ur samma ström, men den här servern serverar ingen konst - de rutorna star tomma.</div>
 <script>
 const cv = document.getElementById('cv');
 const ctx = cv.getContext('2d');
-const status = document.getElementById('status');
+const statusEl = document.getElementById('status');
 
+// Icons arrive as NAMES; the painter picks the glyph. Same contract as the
+// native side, which looks them up in an atlas.
 const ICONS = {
-  sword: '🗡️', shield: '🛡️', bow: '🏹', potion: '🧪', ring: '💍',
-  orb: '🔮', scroll: '📜', key: '🗝️', pickaxe: '⛏️', meat: '🍖',
-  gem: '💎', thread: '🧵', coin: '🪙',
+  // Every name the gallery can ask for. A name the painter does not know
+  // draws a dot, which is how the tree came out as two grey specks - so this
+  // list is taken from what the document actually emits, not from guesswork.
+  folder: '\u{1F4C1}', file: '\u{1F4C4}', search: '\u{1F50D}', settings: '⚙',
+  bell: '\u{1F514}', user: '\u{1F464}', lock: '\u{1F512}', copy: '❐',
+  trash: '\u{1F5D1}', menu: '≡', close: '✕', x: '✕',
+  check: '✔', plus: '＋', minus: '−',
+  play: '▶', pause: '⏸',
+  star: '★', heart: '♥', diamond: '◆', circle: '●', triangle: '▲',
+  chevron: '›', chevron_right: '›', chevron_left: '‹',
+  chevron_down: 'ˇ', chevron_up: 'ˆ',
+  arrow_right: '→', arrow_left: '←', arrow_up: '↑', arrow_down: '↓',
+  // The inventory demo's own set.
+  sword: '\u{1F5E1}', shield: '\u{1F6E1}', bow: '\u{1F3F9}', potion: '\u{1F9EA}',
+  ring: '\u{1F48D}', orb: '\u{1F52E}', scroll: '\u{1F4DC}', key: '\u{1F5DD}',
+  pickaxe: '⛏', meat: '\u{1F356}', gem: '\u{1F48E}', coin: '\u{1FA99}',
 };
 
-function paint(frame) {
-  ctx.clearRect(0, 0, cv.width, cv.height);
-  ctx.textBaseline = 'top';
-  for (const c of frame.commands) {
-    if (c.kind === 'rect') {
-      ctx.fillStyle = c.color;
-      ctx.fillRect(c.x, c.y, c.w, c.h);
-    } else if (c.kind === 'text') {
-      ctx.fillStyle = c.color;
-      const size = c.size || 13;
-      ctx.font = (size >= 14 ? '600 ' : '') + size + 'px "Segoe UI", system-ui, sans-serif';
-      ctx.fillText(c.text, c.x, c.y + 1);
-    } else if (c.kind === 'icon') {
-      // Icons arrive as NAMES — the backend picks the glyph (emoji today,
-      // textures once the image DrawCmd lands). Keeps non-ASCII out of Orion.
-      const glyph = ICONS[c.icon] || '?';
-      const size = c.size || 24;
-      ctx.font = size + 'px "Segoe UI Emoji", serif';
-      ctx.fillText(glyph, c.x, c.y);
-    }
-  }
+// --- the pieces every command needs ---------------------------------------
+
+// Veil says colours as #rrggbbaa, which CSS takes as-is. An empty colour
+// means "do not paint", never "paint black".
+function ink(c) { return (c && c.length > 1) ? c : null; }
+
+// `radius` crosses as a string so one command can carry four corners:
+// "8" is all four, "8 0 8 0" is top-left, top-right, bottom-right,
+// bottom-left. Held to half the shorter side, the way the shader holds it,
+// so asking for more than the box is how you say "all the way round".
+function corners(r, w, h) {
+  const parts = String(r == null ? 0 : r).trim().split(/\s+/).map(Number);
+  const four = parts.length >= 4 ? parts.slice(0, 4)
+             : parts.length === 2 ? [parts[0], parts[1], parts[0], parts[1]]
+             : [parts[0] || 0, parts[0] || 0, parts[0] || 0, parts[0] || 0];
+  const cap = Math.min(w, h) / 2;
+  return four.map(v => Math.max(0, Math.min(cap, v || 0)));
 }
 
-const ws = new WebSocket('ws://' + location.hostname + ':7799');
-ws.onopen = () => { status.textContent = 'connected — every pixel below is a Veil DisplayList'; };
-ws.onclose = () => { status.textContent = 'disconnected — is the orbit process running?'; };
-ws.onmessage = e => {
-  try { paint(JSON.parse(e.data)); }
-  catch (err) { status.textContent = 'bad frame: ' + err.message; }
-};
+function roundPath(x, y, w, h, rad) {
+  const [tl, tr, br, bl] = corners(rad, w, h);
+  ctx.beginPath();
+  ctx.moveTo(x + tl, y);
+  ctx.lineTo(x + w - tr, y);
+  ctx.arcTo(x + w, y, x + w, y + tr, tr);
+  ctx.lineTo(x + w, y + h - br);
+  ctx.arcTo(x + w, y + h, x + w - br, y + h, br);
+  ctx.lineTo(x + bl, y + h);
+  ctx.arcTo(x, y + h, x, y + h - bl, bl);
+  ctx.lineTo(x, y + tl);
+  ctx.arcTo(x, y, x + tl, y, tl);
+  ctx.closePath();
+}
 
-cv.addEventListener('click', ev => {
-  if (ws.readyState !== WebSocket.OPEN) return;
+// Clipping is a SETTING, not a stack. The resolver has already worked out
+// what is inside every clip a node sits under, so each clip command says
+// the finished box: take the last one off, put this one on. A negative box
+// is how it says there is no clip at all.
+let clipped = false;
+function setClip(c) {
+  if (clipped) { ctx.restore(); clipped = false; }
+  if (!c || c.w < 0 || c.h < 0) return;
+  ctx.save();
+  roundPath(c.x, c.y, c.w, c.h, c.radius);
+  ctx.clip();
+  clipped = true;
+}
+
+// --- the painter ----------------------------------------------------------
+
+function paint(frame) {
+  setClip(null);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  ctx.textBaseline = 'top';
+  ctx.lineJoin = 'round';
+
+  for (const c of frame.commands) {
+    switch (c.kind) {
+
+      case 'rect': {
+        const fill = ink(c.color);
+        if (!fill) break;
+        ctx.fillStyle = fill;
+        // A gradient crosses as "grad:<from>:<to>" in the colour slot,
+        // because a fill that changes down its own box is a fill, not a
+        // second kind of command.
+        if (fill.startsWith('grad:')) {
+          const [, from, to] = fill.split(':');
+          const g = ctx.createLinearGradient(c.x, c.y, c.x, c.y + c.h);
+          g.addColorStop(0, '#' + from);
+          g.addColorStop(1, '#' + to);
+          ctx.fillStyle = g;
+        }
+        roundPath(c.x, c.y, c.w, c.h, c.radius);
+        ctx.fill();
+        break;
+      }
+
+      // A shadow is the same rounded box drawn with a blur behind it, and
+      // nothing on top - the box that casts it comes next in the stream.
+      case 'shadow': {
+        const col = ink(c.color);
+        if (!col) break;
+        ctx.save();
+        ctx.shadowColor = col;
+        ctx.shadowBlur = c.blur || 0;
+        ctx.fillStyle = col;
+        roundPath(c.x, c.y, c.w, c.h, c.radius);
+        ctx.fill();
+        ctx.restore();
+        break;
+      }
+
+      case 'clip': setClip(c); break;
+
+      case 'text': {
+        const col = ink(c.color);
+        if (!col) break;
+        ctx.fillStyle = col;
+        ctx.font = (c.size || 13) + 'px VeilBody, system-ui, sans-serif';
+        ctx.fillText(c.text, c.x, c.y);
+        break;
+      }
+
+      case 'icon': {
+        const col = ink(c.color);
+        ctx.fillStyle = col || '#e6e6e6';
+        const size = c.size || 16;
+        ctx.font = size + 'px "Segoe UI Emoji", "Apple Color Emoji", serif';
+        ctx.fillText(ICONS[c.icon] || '·', c.x, c.y);
+        break;
+      }
+
+      // A ring: a stroked arc of `thick` between two angles. A progress
+      // ring, a cooldown sweep, a gauge - all of them are this.
+      case 'arc': {
+        const col = ink(c.color);
+        if (!col) break;
+        const r = (c.outer || 0) - (c.thick || 0) / 2;
+        if (r <= 0) break;
+        ctx.save();
+        ctx.beginPath();
+        // Veil counts degrees clockwise from twelve o'clock, which is how
+        // anybody reading a dial counts them.
+        const from = (c.from - 90) * Math.PI / 180;
+        const to = (c.to - 90) * Math.PI / 180;
+        ctx.arc(c.x, c.y, r, from, to);
+        ctx.strokeStyle = col;
+        ctx.lineWidth = c.thick || 1;
+        ctx.lineCap = 'butt';
+        ctx.stroke();
+        ctx.restore();
+        break;
+      }
+
+      // A filled outline. Points arrive as "x,y x,y ..." already in pixels.
+      case 'path': {
+        const col = ink(c.color);
+        if (!col || !c.points) break;
+        const pts = c.points.trim().split(/\s+/).map(s => s.split(',').map(Number));
+        if (pts.length < 2) break;
+        ctx.beginPath();
+        ctx.moveTo(pts[0][0], pts[0][1]);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+        ctx.closePath();
+        ctx.fillStyle = col;
+        ctx.fill();
+        break;
+      }
+
+      case 'image': {
+        const img = pictureOf(c.image);
+        if (img) ctx.drawImage(img, c.x, c.y, c.w, c.h);
+        break;
+      }
+
+      case 'sprite': {
+        const img = pictureOf(c.image);
+        if (!img) break;
+        const k = (c.scale || 100) / 100;
+        ctx.drawImage(img, c.x, c.y, img.width * k, img.height * k);
+        break;
+      }
+
+      // Nine-slice: the corners keep their size, the edges stretch along
+      // one way and the middle stretches both. CSS calls this border-image
+      // and a game calls it every frame it ever drew.
+      case 'nine': {
+        const img = pictureOf(c.image);
+        if (!img) break;
+        const s = c.corner || 8;
+        const iw = img.width, ih = img.height;
+        const cols = [[0, s], [s, iw - 2 * s], [iw - s, s]];
+        const rows = [[0, s], [s, ih - 2 * s], [ih - s, s]];
+        const dcols = [[c.x, s], [c.x + s, c.w - 2 * s], [c.x + c.w - s, s]];
+        const drows = [[c.y, s], [c.y + s, c.h - 2 * s], [c.y + c.h - s, s]];
+        for (let r = 0; r < 3; r++) for (let q = 0; q < 3; q++) {
+          if (cols[q][1] <= 0 || rows[r][1] <= 0 || dcols[q][1] <= 0 || drows[r][1] <= 0) continue;
+          ctx.drawImage(img, cols[q][0], rows[r][0], cols[q][1], rows[r][1],
+                             dcols[q][0], drows[r][0], dcols[q][1], drows[r][1]);
+        }
+        break;
+      }
+    }
+  }
+  setClip(null);
+}
+
+// Pictures arrive as names too. Loaded once, kept, and redrawn when they
+// land - a missing picture is a hole, never a stall.
+const pictures = new Map();
+function pictureOf(name) {
+  if (!name) return null;
+  if (pictures.has(name)) return pictures.get(name) || null;
+  const img = new Image();
+  img.onload = () => { pictures.set(name, img); if (last) paint(last); };
+  img.onerror = () => pictures.set(name, null);
+  img.src = '/picture/' + encodeURIComponent(name);
+  pictures.set(name, null);
+  return null;
+}
+
+// --- the wire -------------------------------------------------------------
+// One request, one frame. Ask for a frame after anything that could have
+// changed one, and paint what comes back. A websocket would be fewer round
+// trips and not one line more convincing.
+
+let last = null;
+let asking = false;
+// Waiting work. A press must NEVER be lost: the pointer always moves a
+// little as a finger or a mouse button goes down, and a single slot for
+// what is waiting meant that move quietly replaced the click. Moves may
+// collapse into each other - only the newest one is worth asking about -
+// but a press and a wheel each queue in their own right.
+const waiting = [];
+
+function later(what, x, y) {
+  if (what === 'move') {
+    const back = waiting[waiting.length - 1];
+    if (back && back[0] === 'move') { waiting[waiting.length - 1] = [what, x, y]; return; }
+  }
+  waiting.push([what, x, y]);
+}
+
+async function ask(what, x, y) {
+  if (asking) { later(what, x, y); return; }
+  asking = true;
+  try {
+    const r = await fetch(`/frame?what=${what}&x=${x}&y=${y}`);
+    const got = await r.json();
+    // "same" means the event changed nothing on the screen, which is what
+    // most pointer moves do. Four bytes, no parse worth the name, and no
+    // repaint - the canvas already shows the right thing.
+    if (!got.same) {
+      last = got;
+      paint(last);
+      statusEl.innerHTML = `<b>${last.commands.length}</b> ritkommandon, samma resolver som native`;
+    }
+  } catch (err) {
+    statusEl.textContent = 'ingen kontakt - kor orbit-processen i examples/web_demo';
+  }
+  asking = false;
+  const next = waiting.shift();
+  if (next) ask(next[0], next[1], next[2]);
+}
+
+// The canvas is 1040 wide whatever room the window gives it, so a pointer
+// at a page pixel is not at a canvas pixel. Every click landed somewhere
+// else until this divided it back.
+function spot(ev) {
   const r = cv.getBoundingClientRect();
-  ws.send(JSON.stringify({
-    x: Math.round(ev.clientX - r.left),
-    y: Math.round(ev.clientY - r.top),
-  }));
+  return [
+    Math.round((ev.clientX - r.left) * cv.width / r.width),
+    Math.round((ev.clientY - r.top) * cv.height / r.height),
+  ];
+}
+
+// A mouse reports far more moves than a screen has frames, and every one
+// of them used to become its own request. Moves are held until the next
+// paint the browser was going to do anyway - which is exactly the rate the
+// native renderer redraws at. A press is never held: it goes at once.
+let pending = null;
+function onFrame() {
+  const p = pending;
+  pending = null;
+  if (p) ask(p[2] || 'move', p[0], p[1]);
+}
+let down = false;
+cv.addEventListener('pointerdown', () => { down = true; });
+addEventListener('pointerup', () => { down = false; });
+cv.addEventListener('pointermove', e => {
+  const had = pending;
+  pending = spot(e);
+  pending.push(down ? 'drag' : 'move');
+  if (!had) requestAnimationFrame(onFrame);
 });
+cv.addEventListener('pointerdown', e => { cv.setPointerCapture(e.pointerId); pending = null; const [x, y] = spot(e); ask('down', x, y); });
+cv.addEventListener('pointerup', e => { pending = null; const [x, y] = spot(e); ask('up', x, y); });
+// A key belongs to whatever the screen says is being typed into, and the
+// screen is the server's business - so the key goes there as it is. Codes
+// rather than characters for the ones that MOVE, a character for the rest,
+// which is the same split every editor makes.
+addEventListener('keydown', e => {
+  if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) { ask('char&code=' + e.key.charCodeAt(0), 0, 0); }
+  else if (['Backspace','Delete','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','Enter'].indexOf(e.key) >= 0) {
+    const codes = { Backspace: 8, Delete: 46, ArrowLeft: 37, ArrowRight: 39, ArrowUp: 38, ArrowDown: 40, Home: 36, End: 35, Enter: 13 };
+    e.preventDefault();
+    ask('key&code=' + codes[e.key] + '&shift=' + (e.shiftKey ? 1 : 0) + '&ctrl=' + (e.ctrlKey ? 1 : 0), 0, 0);
+  }
+});
+cv.addEventListener('wheel', e => { e.preventDefault(); ask('wheel', 0, Math.round(e.deltaY)); }, { passive: false });
+
+// The font has to be there before the first frame is painted, or the first
+// screen is drawn in a face nobody measured.
+// The very TTF the resolver measured with, from the same process, put in
+// place before the first frame is painted.
+async function withFont() {
+  try {
+    const b64 = await (await fetch('/font.b64')).text();
+    const raw = atob(b64.trim());
+    const buf = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) buf[i] = raw.charCodeAt(i);
+    const face = new FontFace('VeilBody', buf.buffer);
+    await face.load();
+    document.fonts.add(face);
+  } catch (err) {
+    statusEl.textContent = 'ritar i en annan face an den som matte: ' + err.message;
+  }
+  ask('none', 0, 0);
+}
+withFont();
 </script>
 </body>
 </html>
