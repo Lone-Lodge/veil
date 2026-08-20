@@ -46,6 +46,16 @@ public define motion_busy() -> truth:
 # Where `key` has got to on its way to `target`. First ask puts it there;
 # after that it closes the remaining distance in proportion to how much of
 # `ease_ms` has passed.
+# Has this one arrived? A thing that is where it was asked to be is not
+# moving, and a box that is not moving does not move what is inside it.
+# Worth asking, because a scrolling box that has landed can be skipped along
+# with everything under it.
+public define landed(key: text, target: int) -> truth:
+    kv = "veil:m:v:{key}"
+    if not slot_has(kv):
+        return true
+    slot_get_int(kv) is target
+
 public define smooth(key: text, target: int) -> int:
     kv = "veil:m:v:{key}"
     kt = "veil:m:t:{key}"

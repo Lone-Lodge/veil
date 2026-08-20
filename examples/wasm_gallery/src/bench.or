@@ -291,3 +291,32 @@ public define bench_frame_cold2() -> int:
     was = first_frame(doc, dress, face, box())
     warm = gallery_doc(screen("kontroller", "confirm", 0, "Utforskare|Konsol"))
     length(was.list.commands) + length(warm.nodes)
+
+# A HUD, not a gallery page: what a small screen costs end to end, laid out
+# AND painted. The gallery is a stress test with a hundred and sixty boxes
+# of text; a game draws a couple of dozen.
+public define bench_hud(n: int) -> int:
+    face = font_body()
+    dress = gallery_theme()
+    doc = plain_doc(n)
+    length(resolve_placed(doc, dress, face, layout_in(doc, dress, face, box())).commands)
+
+# The parts of a told frame, so its quarter of a millisecond can be put
+# where it goes. Each one includes everything before it: subtract to get
+# the piece.
+public define bench_again() -> int:
+    face = font_body()
+    dress = gallery_theme()
+    g = held_gallery()
+    doc = gallery_doc(g)
+    a = first_frame(doc, dress, face, box())
+    length(measure_again(doc, dress, face, a.doc, a.sizes).box)
+
+public define bench_placed() -> int:
+    face = font_body()
+    dress = gallery_theme()
+    g = held_gallery()
+    doc = gallery_doc(g)
+    a = first_frame(doc, dress, face, box())
+    sizes = measure_again(doc, dress, face, a.doc, a.sizes)
+    length(place_from(doc, dress, face, sizes, box(), a.placed))

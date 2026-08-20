@@ -20,9 +20,17 @@
 <body>
 <div id="status">laddar…</div>
 <canvas id="cv"></canvas>
+<script src="gl.js"></script>
 <script>
-const cv = document.getElementById('cv');
-const ctx = cv.getContext('2d');
+// A canvas hands out ONE kind of context for its whole life, so the two
+// painters get a canvas each, laid in the same place. The card draws unless
+// ?gpu=0 says otherwise, and then the canvas2d reader takes over - which is
+// also what happens by itself on a machine with no webgl2.
+const onGpu = location.search.indexOf('gpu=0') < 0;
+const flat = document.getElementById('cv');
+const cv = onGpu ? flat.cloneNode(false) : flat;
+if (onGpu) { cv.id = 'cv'; flat.id = 'flat'; flat.replaceWith(cv); }
+const ctx = onGpu ? flat.getContext('2d') : cv.getContext('2d');
 const statusEl = document.getElementById('status');
 
 // The screen veil lays out for, in its own pixels - which is whatever room
@@ -60,48 +68,10 @@ const ICONS = {
   pickaxe: '⛏', meat: '\u{1F356}', gem: '\u{1F48E}', coin: '\u{1FA99}',
 };
 
-// An empty colour means "do not paint", never "paint black".
-function ink(c) { return (c && c.length > 1) ? c : null; }
-
-// A radius crosses as a string so one command can carry four corners:
-// "8" is all four, "8 0 8 0" goes top-left, top-right, bottom-right,
-// bottom-left. Held to half the shorter side, the way the shader holds it.
-function corners(r, w, h) {
-  const parts = String(r == null ? 0 : r).trim().split(/\s+/).map(Number);
-  const four = parts.length >= 4 ? parts.slice(0, 4)
-             : parts.length === 2 ? [parts[0], parts[1], parts[0], parts[1]]
-             : [parts[0] || 0, parts[0] || 0, parts[0] || 0, parts[0] || 0];
-  const cap = Math.min(w, h) / 2;
-  return four.map(v => Math.max(0, Math.min(cap, v || 0)));
-}
-
-function roundPath(x, y, w, h, rad) {
-  const [tl, tr, br, bl] = corners(rad, w, h);
-  ctx.beginPath();
-  ctx.moveTo(x + tl, y);
-  ctx.lineTo(x + w - tr, y);
-  ctx.arcTo(x + w, y, x + w, y + tr, tr);
-  ctx.lineTo(x + w, y + h - br);
-  ctx.arcTo(x + w, y + h, x + w - br, y + h, br);
-  ctx.lineTo(x + bl, y + h);
-  ctx.arcTo(x, y + h, x, y + h - bl, bl);
-  ctx.lineTo(x, y + tl);
-  ctx.arcTo(x, y, x + tl, y, tl);
-  ctx.closePath();
-}
-
 // Clipping is a SETTING, not a stack. The resolver has already worked out
 // what is inside every clip a node sits under, so each command says the
 // finished box. A box with no area is how it says there is no clip.
 let clipped = false;
-function setClip(x, y, w, h, rad) {
-  if (clipped) { ctx.restore(); clipped = false; }
-  if (w < 0 || h < 0) return;
-  ctx.save();
-  roundPath(x, y, w, h, rad);
-  ctx.clip();
-  clipped = true;
-}
 
 // Pictures arrive as names. Loaded once, kept, and the frame asked for
 // again when one lands - a missing picture is a hole, never a stall.
@@ -123,13 +93,289 @@ function pictureOf(name) {
 let wearing = '';
 function face(f) { if (f !== wearing) { ctx.font = f; wearing = f; } }
 
+// The font shorthand for a size, built once per size rather than once per
+// line of text.
+const BODY = [], MARKS = [];
+function bodyFont(size) { return BODY[size] || (BODY[size] = size + 'px VeilBody, system-ui, sans-serif'); }
+function markFont(size) { return MARKS[size] || (MARKS[size] = size + 'px "Segoe UI Symbol", "Apple Symbols", "Segoe UI Emoji", "Apple Color Emoji", serif'); }
+
+
+// --- the whole frame, as numbers ------------------------------------------
+//
+// The eleven painters above say a frame one command at a time, and every
+// colour and every radius crosses as a STRING this side then has to read.
+// This is the same frame as two blocks of numbers and one call.
+//
+//   cmds   twelve numbers a command, always in the same places
+//   words  the letters, one byte to a number
+//
+// A colour arrives as `0xrrggbbaa` in one number. The table below turns it
+// into the string canvas wants, once ever - twenty of those on a screen,
+// against a hundred and fifty reads before.
+
+const inks = new Map();
+function inkOf(v) {
+  let s = inks.get(v);
+  if (s === undefined) {
+    s = '#' + (v >>> 0).toString(16).padStart(8, '0');
+    inks.set(v, s);
+  }
+  return s;
+}
+
+// A word out of the block: a length and then its bytes, one to a number.
+const utf8Words = new TextDecoder();
+let wordBytes = new Uint8Array(256);
+function wordFrom(get, start) {
+  const n = get(start);
+  if (n > wordBytes.length) wordBytes = new Uint8Array(n * 2);
+  for (let i = 0; i < n; i++) wordBytes[i] = get(start + 1 + i);
+  return utf8Words.decode(wordBytes.subarray(0, n));
+}
+
+// Corners come as four numbers now, so nothing is parsed here.
+function fourPath(x, y, w, h, tl, tr, br, bl) {
+  if ((tl | tr | br | bl) === 0) { ctx.beginPath(); ctx.rect(x, y, w, h); return; }
+  const cap = Math.min(w, h) / 2;
+  if (tl === tr && tr === br && br === bl) {
+    ctx.beginPath(); ctx.roundRect(x, y, w, h, Math.min(tl, cap));
+    return;
+  }
+  const a = Math.min(tl, cap), b = Math.min(tr, cap), c = Math.min(br, cap), d = Math.min(bl, cap);
+  ctx.beginPath();
+  ctx.moveTo(x + a, y);
+  ctx.lineTo(x + w - b, y);
+  ctx.arcTo(x + w, y, x + w, y + b, b);
+  ctx.lineTo(x + w, y + h - c);
+  ctx.arcTo(x + w, y + h, x + w - c, y + h, c);
+  ctx.lineTo(x + d, y + h);
+  ctx.arcTo(x, y + h, x, y + h - d, d);
+  ctx.lineTo(x, y + a);
+  ctx.arcTo(x, y, x + a, y, a);
+  ctx.closePath();
+}
+
+function clipTo(x, y, w, h, rad) {
+  if (clipped) { ctx.restore(); clipped = false; }
+  if (w < 0 || h < 0) return;
+  ctx.save();
+  fourPath(x, y, w, h, rad, rad, rad, rad);
+  ctx.clip();
+  clipped = true;
+}
+
+// One frame. `cmds` and `words` are lists in linear memory: a length, then
+// the numbers. Read as one Int32Array each and walked with no allocation.
+function paintFrame(cmdsPtr, count, wordsPtr) {
+  // A DataView, not an Int32Array: the allocator hands out one block where
+  // the last one ended, so a block can start on any byte, and a typed array
+  // insists on a multiple of four. getInt32 does not care.
+  const d = bump();
+  const cmdAt = cmdsPtr + 4, wordAt0 = wordsPtr + 4;
+  const num = (i) => d.getInt32(cmdAt + i * 4, true);
+  const wordNum = (i) => d.getInt32(wordAt0 + i * 4, true);
+  drawn = count;
+  for (let i = 0, at = 0; i < count; i++, at += 12) {
+    const kind = num(at);
+    const colour = num(at + 5);
+    // -2 is "do not paint" and never needs a string; -1 is a gradient and
+    // says so in letters.
+    if (colour === -2 && kind !== 3 && kind < 8) continue;
+    const x = num(at + 1), y = num(at + 2), w = num(at + 3), h = num(at + 4);
+
+    if (kind === 1) {
+      if (colour >= 0) ctx.fillStyle = inkOf(colour);
+      else {
+        const said = wordFrom(wordNum, num(at + 11));
+        if (said.startsWith('grad:')) {
+          const bits = said.split(':');
+          const g = ctx.createLinearGradient(x, y, x, y + h);
+          g.addColorStop(0, '#' + bits[1]); g.addColorStop(1, '#' + bits[2]);
+          ctx.fillStyle = g;
+        } else ctx.fillStyle = said;
+      }
+      fourPath(x, y, w, h, num(at + 6), num(at + 7), num(at + 8), num(at + 9));
+      ctx.fill();
+    } else if (kind === 2) {
+      ctx.save();
+      const col = colour >= 0 ? inkOf(colour) : wordFrom(wordNum, num(at + 11));
+      ctx.shadowColor = col; ctx.shadowBlur = num(at + 7) || 0; ctx.fillStyle = col;
+      fourPath(x, y, w, h, num(at + 6), num(at + 6), num(at + 6), num(at + 6));
+      ctx.fill();
+      ctx.restore();
+    } else if (kind === 3) {
+      clipTo(x, y, w, h, num(at + 6));
+    } else if (kind === 4) {
+      ctx.fillStyle = colour >= 0 ? inkOf(colour) : wordFrom(wordNum, num(at + 11));
+      face(bodyFont(num(at + 6) || 13));
+      ctx.fillText(wordFrom(wordNum, num(at + 10)), x, y);
+    } else if (kind === 5) {
+      const side = num(at + 6) || 16;
+      ctx.fillStyle = colour >= 0 ? inkOf(colour) : wordFrom(wordNum, num(at + 11));
+      face(markFont(side));
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(ICONS[wordFrom(wordNum, num(at + 10))] || '·', x + side / 2, y + side / 2);
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    } else if (kind === 6) {
+      const thick = num(at + 7) || 1;
+      const r = (num(at + 6) || 0) - thick / 2;
+      if (r <= 0) continue;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(x, y, r, (num(at + 8) - 90) * Math.PI / 180, (num(at + 9) - 90) * Math.PI / 180);
+      ctx.strokeStyle = colour >= 0 ? inkOf(colour) : wordFrom(wordNum, num(at + 11));
+      ctx.lineWidth = thick; ctx.lineCap = 'butt';
+      ctx.stroke();
+      ctx.restore();
+    } else if (kind === 7) {
+      const pts = wordFrom(wordNum, num(at + 10)).trim().split(/\s+/);
+      if (pts.length < 2) continue;
+      ctx.fillStyle = colour >= 0 ? inkOf(colour) : wordFrom(wordNum, num(at + 11));
+      ctx.beginPath();
+      for (let k = 0; k < pts.length; k++) {
+        const xy = pts[k].split(',');
+        if (k === 0) ctx.moveTo(+xy[0], +xy[1]); else ctx.lineTo(+xy[0], +xy[1]);
+      }
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      const img = pictureOf(wordFrom(wordNum, num(at + 10)));
+      if (!img) continue;
+      if (kind === 8) ctx.drawImage(img, x, y, w, h);
+      else if (kind === 10) { const k = (num(at + 6) || 100) / 100; ctx.drawImage(img, x, y, img.width * k, img.height * k); }
+      else {
+        const s = num(at + 6) || 8, iw = img.width, ih = img.height;
+        const cols = [[0, s], [s, iw - 2*s], [iw - s, s]];
+        const rows = [[0, s], [s, ih - 2*s], [ih - s, s]];
+        const dc = [[x, s], [x + s, w - 2*s], [x + w - s, s]];
+        const dr = [[y, s], [y + s, h - 2*s], [y + h - s, s]];
+        for (let r2 = 0; r2 < 3; r2++) for (let q = 0; q < 3; q++) {
+          if (cols[q][1] <= 0 || rows[r2][1] <= 0 || dc[q][1] <= 0 || dr[r2][1] <= 0) continue;
+          ctx.drawImage(img, cols[q][0], rows[r2][0], cols[q][1], rows[r2][1], dc[q][0], dr[r2][0], dc[q][1], dr[r2][1]);
+        }
+      }
+    }
+  }
+  return count;
+}
+
+
+// --- the same frame, handed to the card -----------------------------------
+// The number block goes almost straight into instances. What the reader
+// above says with three hundred and fifty canvas calls, this says with one
+// draw call: a rounded box, a ring and a letter are the same shape once a
+// letter is a picture on a sheet.
+//
+// Behind ?gpu=1 while it is checked against the reader above, which is the
+// one that has to keep working.
+let GL = null;
+const F = 1 / 255;
+
+// `#rrggbb` or `#rrggbbaa`, with or without the hash, as four numbers.
+function hexInk(t) {
+  const hex = t.charCodeAt(0) === 35 ? t.slice(1) : t;
+  const v = parseInt(hex.slice(0, 6), 16) || 0;
+  return [((v >> 16) & 255) * F, ((v >> 8) & 255) * F, (v & 255) * F,
+          hex.length >= 8 ? parseInt(hex.slice(6, 8), 16) * F : 1];
+}
+
+function glFrame(cmdsPtr, count, wordsPtr) {
+  const g = GL || (GL = makeGl(cv));
+  if (!g) return paintFrame(cmdsPtr, count, wordsPtr);
+  const d = bump();
+  const cmdAt = cmdsPtr + 4, wordAt0 = wordsPtr + 4;
+  const num = (i) => d.getInt32(cmdAt + i * 4, true);
+  const wordNum = (i) => d.getInt32(wordAt0 + i * 4, true);
+  drawn = count;
+  g.begin(W, H);
+  for (let i = 0, at = 0; i < count; i++, at += 12) {
+    const kind = num(at);
+    const colour = num(at + 5);
+    if (colour === -2 && kind !== 3 && kind < 8) continue;
+    const x = num(at + 1), y = num(at + 2), w = num(at + 3), h = num(at + 4);
+    // Four numbers out of one, the way the shader wants them. A gradient
+    // still crosses as letters and shows its first stop until the shader
+    // learns a second one.
+    let r = 0, gr = 0, b = 0, a = 1, slide = null;
+    if (colour >= 0) {
+      r = ((colour >>> 24) & 255) * F; gr = ((colour >>> 16) & 255) * F;
+      b = ((colour >>> 8) & 255) * F;  a = (colour & 255) * F;
+    } else if (kind !== 3) {
+      const said = wordFrom(wordNum, num(at + 11));
+      const stops = said.startsWith('grad:') ? said.split(':') : null;
+      const first = hexInk(stops ? stops[1] : said);
+      r = first[0]; gr = first[1]; b = first[2]; a = first[3];
+      if (stops) slide = hexInk(stops[2]);
+    }
+
+    if (kind === 1) {
+      // A slide of colour is the same box with its far end riding along.
+      if (slide) g.put(x, y, w, h, num(at + 6), num(at + 7), num(at + 8), num(at + 9),
+                       r, gr, b, a, 3, 0, 0, slide[0], slide[1], slide[2], slide[3]);
+      else g.put(x, y, w, h, num(at + 6), num(at + 7), num(at + 8), num(at + 9), r, gr, b, a, 0, 0, 0, 0, 0, 0, 0);
+    } else if (kind === 2) {
+      const rad = num(at + 6);
+      g.put(x, y, w, h, rad, rad, rad, rad, r, gr, b, a, 0, num(at + 7) || 0, 0, 0, 0, 0, 0);
+    } else if (kind === 3) {
+      g.clip(w < 0 || h < 0 ? null : [x, y, w, h, num(at + 6)]);
+    } else if (kind === 4 || kind === 5) {
+      const size = num(at + 6) || 13;
+      const mark = kind === 5;
+      const face = g.faceOf(mark ? markFont(size) : bodyFont(size), mark);
+      if (mark) {
+        const word = ICONS[wordFrom(wordNum, num(at + 10))] || '·';
+        // A mark hangs from the middle of its square, centred - the same
+        // two anchors the sheet was written from.
+        const gm = g.glyphOf(face, word);
+        if (gm.w > 0) g.put(Math.round((x + size / 2) * dots) / dots + gm.dx, Math.round((y + size / 2) * dots) / dots + gm.dy, gm.w, gm.h, 0, 0, 0, 0,
+                            r, gr, b, a, 1, 0, 0, gm.u0, gm.v0, gm.u1, gm.v1);
+      } else {
+        // The line says what line it is, and the word block says how long.
+        // On a hit nothing is read: not the letters, not the sheet. Veil
+        // measured this line by adding up advances, so the row was laid out
+        // the same way, letter by letter, which is what was measured.
+        const name = num(at + 7), off = num(at + 10);
+        let row = face.rows.get(name);
+        if (row === undefined || row.len !== wordNum(off)) {
+          row = g.rowFor(face, wordFrom(wordNum, off), wordNum(off));
+          face.rows.set(name, row);
+        }
+        for (let k = 0; k < row.n; k++) {
+          const gm = row.gs[k];
+          // A letter was drawn onto the sheet on whole pixels, so it is put
+          // back on whole pixels. Landing it a third of a pixel over means
+          // the card blends between texels and the letter goes soft; the
+          // pen still walks in fractions, only the landing is snapped.
+          g.put(Math.round((x + row.offs[k]) * dots) / dots + gm.dx, y + gm.dy, gm.w, gm.h, 0, 0, 0, 0,
+                r, gr, b, a, 1, 0, 0, gm.u0, gm.v0, gm.u1, gm.v1);
+        }
+      }
+    } else if (kind === 6) {
+      const thick = num(at + 7) || 1, outer = num(at + 6) || 0;
+      if (outer <= 0) continue;
+      const side = outer * 2 + thick;
+      g.put(x - side / 2, y - side / 2, side, side, outer - thick / 2, 0, 0, 0,
+            r, gr, b, a, 2, 0, thick, num(at + 8) * Math.PI / 180, num(at + 9) * Math.PI / 180, 0, 0);
+    } else if (kind === 7) {
+      const said = wordFrom(wordNum, num(at + 10)).trim().split(/\s+/);
+      const pts = [];
+      for (const one of said) { const xy = one.split(','); if (xy.length === 2) pts.push(+xy[0], +xy[1]); }
+      if (pts.length >= 6) g.polygon(pts, r, gr, b, a, W, H);
+    }
+    // Pictures are still the reader above's job: there is no art in this
+    // example, and a texture apiece is the next thing this file learns.
+  }
+  g.flush(W, H);
+  return count;
+}
+
 // --- the module -----------------------------------------------------------
 // Everything wasm cannot do for itself. The slot store is a Map here and
 // the clock is here, which is the whole of the "state" group - and it is
 // what lets a framework whose caches, motion store and "how long has this
 // been hovered" all live in slots run inside a tab.
 
-let M = null, mod = null, floor = 0;
+let M = null, mod = null, floor = 0, deep = 0;
 const began = performance.now();
 
 // --- the slot store -------------------------------------------------------
@@ -240,129 +486,25 @@ const env = {
   __slot_has: (k) => (slots.find(k) !== undefined ? 1 : 0),
   __now: () => Math.round(performance.now() - began),
   fmt_float: (x, places) => allocText(Number(x).toFixed(places >>> 0)),
-  // There is no arena and no persist region in a page: one linear memory,
-  // a bump pointer, and a host that winds it back between frames.
-  orion_persist_on: () => 0, orion_persist_off: () => 0,
+  // A page CAN have a kept region, and this is the whole of it. The bump
+  // pointer lives at mem[0] and every allocation reads it, so switching
+  // regions is switching what is in that one cell - no allocation code
+  // anywhere knows or cares.
+  //
+  //   mem[0]  the pointer being allocated from
+  //   mem[12] the frame pointer, parked while the kept region is in use
+  //   mem[16] where the kept region has got to
+  //
+  // Counted, not toggled: font_body opens a kept scope inside one that is
+  // already open, and a plain swap would park the KEPT pointer as if it
+  // were the frame's and lose both. The native runtime counts the same way.
+  orion_persist_on: () => { const d = bump(); if (deep++ === 0) { d.setUint32(12, d.getUint32(0, true), true); d.setUint32(0, d.getUint32(16, true), true); } return 0; },
+  orion_persist_off: () => { const d = bump(); if (--deep === 0) { d.setUint32(16, d.getUint32(0, true), true); d.setUint32(0, d.getUint32(12, true), true); } return 0; },
   orion_arena_off: () => 0, orion_arena_on: () => 0, orion_arena_active: () => 0,
 
-  // --- the painter: eleven commands, called as the list is walked ---------
-  // Nothing is serialised and nothing is parsed. A rectangle crosses as
-  // four numbers.
-  page_rect: (x, y, w, h, colP, radP) => {
-    const col = ink(readText(colP));
-    if (!col) return 0;
-    ctx.fillStyle = col;
-    // A fill that changes down its own box is a fill, not a second kind of
-    // command, so a gradient rides in the colour slot.
-    if (col.startsWith('grad:')) {
-      const bits = col.split(':');
-      const g = ctx.createLinearGradient(x, y, x, y + h);
-      g.addColorStop(0, '#' + bits[1]); g.addColorStop(1, '#' + bits[2]);
-      ctx.fillStyle = g;
-    }
-    roundPath(x, y, w, h, readText(radP));
-    ctx.fill();
-    return 1;
-  },
-  // The same rounded box, blurred, with nothing on top - the box that casts
-  // it comes next in the stream.
-  page_shadow: (x, y, w, h, colP, rad, blur) => {
-    const col = ink(readText(colP));
-    if (!col) return 0;
-    ctx.save();
-    ctx.shadowColor = col; ctx.shadowBlur = blur || 0; ctx.fillStyle = col;
-    roundPath(x, y, w, h, rad);
-    ctx.fill();
-    ctx.restore();
-    return 1;
-  },
-  page_clip: (x, y, w, h, rad) => { setClip(x, y, w, h, rad); return 1; },
-  page_text: (x, y, sP, colP, size) => {
-    const col = ink(readText(colP));
-    if (!col) return 0;
-    ctx.fillStyle = col;
-    face((size || 13) + 'px VeilBody, system-ui, sans-serif');
-    ctx.fillText(readText(sP), x, y);
-    return 1;
-  },
-  // An icon with no colour is not painted, exactly like text with none.
-  // Guessing a grey here hid a theme that never said what colour its mark
-  // was, and drew a light grey tick on a blue box.
-  //
-  // A symbol font comes FIRST in the stack. Half of these are text symbols
-  // and half are pictographs; an emoji font renders a tick as a COLOUR
-  // glyph and ignores the fill entirely, which is why the tick came out in
-  // a colour nobody chose. The pictographs have no symbol-font glyph and
-  // fall through to the emoji font on their own.
-  page_icon: (x, y, nameP, size, colP) => {
-    const col = ink(readText(colP));
-    if (!col) return 0;
-    ctx.fillStyle = col;
-    const side = size || 16;
-    face(side + 'px "Segoe UI Symbol", "Apple Symbols", "Segoe UI Emoji", "Apple Color Emoji", serif');
-    // The list says "an icon of this size, at this corner". Where the glyph
-    // the painter substitutes sits inside that square is the painter's own
-    // business, and the middle is where it belongs.
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(ICONS[readText(nameP)] || '·', x + side / 2, y + side / 2);
-    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-    return 1;
-  },
-  // A ring, or a slice of one. Veil counts degrees clockwise from twelve
-  // o'clock, which is how anybody reading a dial counts them.
-  page_arc: (x, y, outer, thick, from, to, colP) => {
-    const col = ink(readText(colP));
-    const r = (outer || 0) - (thick || 0) / 2;
-    if (!col || r <= 0) return 0;
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(x, y, r, (from - 90) * Math.PI / 180, (to - 90) * Math.PI / 180);
-    ctx.strokeStyle = col; ctx.lineWidth = thick || 1; ctx.lineCap = 'butt';
-    ctx.stroke();
-    ctx.restore();
-    return 1;
-  },
-  // A filled outline. Points arrive as "x,y x,y ..." already in pixels.
-  page_path: (ptsP, colP) => {
-    const col = ink(readText(colP));
-    const pts = readText(ptsP).trim().split(/\s+/).map(s => s.split(',').map(Number));
-    if (!col || pts.length < 2) return 0;
-    ctx.beginPath();
-    ctx.moveTo(pts[0][0], pts[0][1]);
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
-    ctx.closePath();
-    ctx.fillStyle = col; ctx.fill();
-    return 1;
-  },
-  page_image: (x, y, pathP, w, h) => {
-    const img = pictureOf(readText(pathP));
-    if (img) ctx.drawImage(img, x, y, w, h);
-    return 1;
-  },
-  page_sprite: (x, y, pathP, scale) => {
-    const img = pictureOf(readText(pathP));
-    if (!img) return 0;
-    const k = (scale || 100) / 100;
-    ctx.drawImage(img, x, y, img.width * k, img.height * k);
-    return 1;
-  },
-  // Nine-slice: the corners keep their size, the edges stretch along one
-  // way and the middle stretches both.
-  page_nine: (x, y, w, h, pathP, corner) => {
-    const img = pictureOf(readText(pathP));
-    if (!img) return 0;
-    const s = corner || 8, iw = img.width, ih = img.height;
-    const cols = [[0, s], [s, iw - 2*s], [iw - s, s]];
-    const rows = [[0, s], [s, ih - 2*s], [ih - s, s]];
-    const dcols = [[x, s], [x + s, w - 2*s], [x + w - s, s]];
-    const drows = [[y, s], [y + s, h - 2*s], [y + h - s, s]];
-    for (let r = 0; r < 3; r++) for (let q = 0; q < 3; q++) {
-      if (cols[q][1] <= 0 || rows[r][1] <= 0 || dcols[q][1] <= 0 || drows[r][1] <= 0) continue;
-      ctx.drawImage(img, cols[q][0], rows[r][0], cols[q][1], rows[r][1],
-                         dcols[q][0], drows[r][0], dcols[q][1], drows[r][1]);
-    }
-    return 1;
-  },
+  // The whole frame in one call. `pack_page` on the other side puts it in
+  // two blocks of numbers; nothing here reads a string it does not have to.
+  page_frame: (cmdsPtr, count, wordsPtr) => (onGpu ? glFrame : paintFrame)(cmdsPtr, count, wordsPtr),
 };
 
 // --- one frame ------------------------------------------------------------
@@ -383,25 +525,73 @@ function bump() {
   return mem0;
 }
 
+// --- two regions ----------------------------------------------------------
+// Above the floor sit a KEPT region and a frame region. A told frame builds
+// itself in the kept one, so the frame before it is still whole when it is
+// read; the frame region is wound back after every frame and holds what a
+// boot call or a resize made.
+//
+// The kept region only grows - a told frame reuses commands that point at
+// words the frame BEFORE it allocated, and that reference never moves
+// forward. When it is nearly full the page empties it and takes ONE cold
+// frame, the one frame that needs no chain behind it.
+// How long a run of told frames can be, in bytes.
+//
+// A told frame reuses commands that point at words the frame BEFORE it
+// allocated, and those point further back again, so the whole run has to
+// stay. The run ends when this fills: the page empties it and takes one
+// cold frame, the one frame that needs nothing behind it.
+//
+// Measured: a told frame of the densest page leaves 380 kB here, so four
+// megabytes is a run of ten and one frame in ten is cold.
+//
+// Twenty four megabytes was tried: it takes the cold frames from one in ten
+// to one in sixty five, and did not measurably shorten the middle frame.
+// A cold frame is 1.3 ms against 0.8 told, so one in ten costs half a
+// tenth of a millisecond on average - too small to see against a machine
+// that varies by twice that between one minute and the next. Four
+// megabytes, then, because it is the smaller number and buys nothing less.
+const KEPT = 4 << 20;
+let keptBase = 0, prev = 0, cold = 0, told = 0;
+
+function room() {
+  const want = floor + KEPT + (8 << 20);
+  if (want > M.buffer.byteLength) M.grow(Math.ceil((want - M.buffer.byteLength) / 65536));
+}
+
+function wipeKept() {
+  bump().setUint32(16, keptBase, true);   // the kept region starts over
+  prev = 0;                               // and the next frame is built cold
+}
+
 function tell(what, x, y, code, mods) {
   if (!mod) return;
-  setClip(0, 0, -1, -1);
+  clipTo(0, 0, -1, -1, 0);
   ctx.setTransform(dots, 0, 0, dots, 0, 0);
   ctx.clearRect(0, 0, W, H);
   ctx.textBaseline = 'top';
   ctx.lineJoin = 'round';
+  drawn = 0;
   const t0 = performance.now();
   try {
-    drawn = mod.frame(what, x | 0, y | 0, code | 0, mods | 0);
+    if (!prev) { prev = mod.blank(); cold++; } else told++;
+    prev = mod.told(prev, what | 0, x | 0, y | 0, code | 0, mods | 0);
+  } catch (err) {
+    deep = 0;                             // a frame that threw left a scope open
+    wipeKept();
+    throw err;
   } finally {
     // Everything this frame allocated is dead now. Winding the pointer back
     // IS the frame region - and it happens even if the frame threw, because
     // a frame that does not give its memory back takes the next one down
     // with it, and the one after that, until the module is out of memory.
-    bump().setUint32(0, floor, true);
+    bump().setUint32(0, floor + KEPT, true);
   }
+  if (bump().getUint32(16, true) - keptBase > KEPT - (256 << 10)) wipeKept();
   spent = performance.now() - t0;
-  setClip(0, 0, -1, -1);
+  recent[at++ % recent.length] = spent;
+  seenFrames++;
+  clipTo(0, 0, -1, -1, 0);
 }
 
 // The canvas is 1040 wide whatever room the window gives it, so a pointer
@@ -429,7 +619,23 @@ function spot(ev) {
 // parse and a page layout for a number nobody reads that fast.
 
 const waiting = [];
-let drawn = 0, spent = 0, said = '', asleep = 0, awake = 0;
+let drawn = 0, spent = 0, said = '', asleep = 0, awake = 0, said_at = 0;
+
+// The last sixty frames, and the middle one of them.
+//
+// A single frame is not a measurement: the same screen, built the same way,
+// takes between three and seven tenths of a millisecond depending on what
+// else the machine is doing. Showing the last one made the number jump and
+// made it look as though nothing ever got faster - it read 0.9 when the
+// middle of six hundred frames was 0.4. So the bar says the middle one.
+const recent = new Float64Array(60);
+let at = 0, seenFrames = 0;
+function middling() {
+  const n = Math.min(seenFrames, recent.length);
+  if (n === 0) return 0;
+  const s = Array.prototype.slice.call(recent, 0, n).sort((a, b) => a - b);
+  return s[n >> 1];
+}
 
 function later(what, x, y, code, mods) {
   const back = waiting[waiting.length - 1];
@@ -463,7 +669,14 @@ function beat() {
   } else {
     while (waiting.length) { const e = waiting.shift(); tell(e[0], e[1], e[2], e[3], e[4]); }
   }
-  const now = '<b>' + drawn + '</b> ritkommandon på <b>' + spent.toFixed(1) + ' ms</b> — veil i wasm, ingen server'
+  // Four times a second, not sixty. The number in it changes every frame,
+  // so writing it every frame is a DOM parse and a page layout inside the
+  // very frame it is reporting on - measuring the thing was part of what
+  // the thing cost.
+  if (performance.now() - said_at < 250) return;
+  said_at = performance.now();
+  const now = '<b>' + drawn + '</b> ritkommandon på <b>' + middling().toFixed(2) + ' ms</b> i mitten av de sista sextio — veil i wasm, ingen server'
+    + (told ? ' · <b>' + Math.round(told * 100 / (told + cold)) + ' %</b> berättade ur den förra' : '')
     + (asleep ? ' · <b>' + Math.round(asleep * 100 / (asleep + awake)) + ' %</b> av ramarna behövde inte byggas' : '');
   if (now !== said) { said = now; statusEl.innerHTML = now; }
 }
@@ -546,6 +759,10 @@ addEventListener('paste', e => {
   // Where the bump pointer stands once the program has started: everything
   // above this line is one frame's worth and is thrown away after each.
   floor = bump().getUint32(0, true);
+  keptBase = floor;
+  room();
+  bump().setUint32(16, keptBase, true);          // the kept region starts here
+  bump().setUint32(0, floor + KEPT, true);       // the frame region after it
   requestAnimationFrame(beat);
 })();
 </script>

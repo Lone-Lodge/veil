@@ -682,7 +682,13 @@ define child_order(doc: SemanticDocument, node: Node) -> [int]:
 # says whether its subtree contains any, so the exception costs a lookup
 # rather than a walk.
 
-public type Sizes: box: [Size2], wraps: [int], styles: [StyleRule]
+# The sizes, and which subtrees are exactly what they were.
+#
+# `same` is 1 for a node whose properties, children and everything below it
+# are unchanged AND whose size came out the same. Placing can then skip it
+# whole: nothing below it can have moved. It is empty from a cold measure,
+# because a frame told from nothing knows of no "before".
+public type Sizes: box: [Size2], wraps: [int], styles: [StyleRule], same: [int]
 
 define wraps_below(doc: SemanticDocument, node_id: int, out: [int]) -> truth:
     node = doc.nodes[node_id]
@@ -730,7 +736,7 @@ public define measure_all(doc: SemanticDocument, theme: Theme, face: Font) -> Si
     loop i in 0 until n:
         wraps = set(wraps, i, if wraps_below(doc, i, wraps) then 1 else 0)
         box = set(box, i, measure_deep(doc, theme, face, i, 0, box, wraps, styles))
-    Sizes{box: box, wraps: wraps, styles: styles}
+    Sizes{box: box, wraps: wraps, styles: styles, same: []}
 
 # The size to use for a child: the cached one, unless something below it
 # wraps and the width on offer is not the one it was measured against.
@@ -847,6 +853,14 @@ define held(doc: SemanticDocument, theme: Theme, face: Font, k: int, x0: int, y0
     place_sized(doc, theme, face, k, nx, ny, nw, nh, acc, sizes)
 
 define place_sized(doc: SemanticDocument, theme: Theme, face: Font, node_id: int, x: int, y: int, w: int, h: int, measured: [Measured], sizes: Sizes) -> [Measured]:
+    # A subtree that is what it was, asked for the box it already had, is
+    # already placed - `measured` came in holding the last frame's rects.
+    # Nothing below it can have moved, so nothing below it is worked out
+    # again. This is the whole of "only redo what changed" for placement,
+    # and it is why a screen with one meter ticking costs one meter.
+    if node_id < length(sizes.same):
+        if sizes.same[node_id] is 1 and same_room(measured[node_id].rect, Rect{x: to_real(x), y: to_real(y), wide: to_real(w), high: to_real(h)}):
+            return measured
     # Read once for this box and carried into every length it works out.
     at_scale = scale_now()
     node = doc.nodes[node_id]
@@ -1075,10 +1089,22 @@ public define layout_in(doc: SemanticDocument, theme: Theme, face: Font, box: Re
 # Placing, given sizes already worked out. Split out so a frame can reuse the
 # sizes it did not have to work out again.
 public define place_all(doc: SemanticDocument, theme: Theme, face: Font, sizes: Sizes, box: Rect) -> [Measured]:
+    place_from(doc, theme, face, sizes, box, [])
+
+# The same, starting from where everything was last time. A subtree that did
+# not change and is asked for the box it already had keeps the rects it came
+# in with, and is never walked.
+public define place_from(doc: SemanticDocument, theme: Theme, face: Font, sizes: Sizes, box: Rect, was: [Measured]) -> [Measured]:
     n = length(doc.nodes)
     edit out = []
-    loop i in 0 until n:
-        out = append(out, Measured{node_id: i, rect: Rect{x: 0, y: 0, wide: 0, high: 0}})
+    if length(was) is n:
+        # A copy, not the array itself: what came in is the frame before, and
+        # the frame before is read again after this one is placed.
+        loop m in was:
+            out = append(out, m)
+    else:
+        loop i in 0 until n:
+            out = append(out, Measured{node_id: i, rect: Rect{x: 0, y: 0, wide: 0, high: 0}})
     if n is 0:
         out
     else:
@@ -1155,10 +1181,14 @@ define measure_again(doc: SemanticDocument, theme: Theme, face: Font, was: Seman
     edit fresh = []
     loop i in 0 until n:
         fresh = append(fresh, 0)
+    edit same = []
+    loop i in 0 until n:
+        same = append(same, 0)
     loop i in 0 until n:
         node = doc.nodes[i]
         wraps = set(wraps, i, if wraps_below(doc, i, wraps) then 1 else 0)
-        edit kept = same_node(node, was.nodes[i]) and wraps[i] is 0
+        alike = same_node(node, was.nodes[i])
+        edit kept = alike and wraps[i] is 0
         if kept:
             loop k in node.children:
                 if fresh[k] is 1:
@@ -1172,7 +1202,45 @@ define measure_again(doc: SemanticDocument, theme: Theme, face: Font, was: Seman
             box = set(box, i, now)
             if not same_size(was_size, now):
                 fresh = set(fresh, i, 1)
-    Sizes{box: box, wraps: wraps, styles: styles}
+        # And whether PLACING may skip it. Unchanged and the same size is
+        # not enough: a box that scrolls keeps its properties while the
+        # scroll it was given eases on, so its children move under it. The
+        # same goes for anything below it, so the flag walks up the way
+        # `fresh` walks up. Children come before parents in a document, so
+        # one pass in index order sees them all.
+        # Whether PLACING may skip it, which is a different question from
+        # whether MEASURING could reuse its size. A node that wraps had to
+        # be measured again - its height depends on the width it is given -
+        # but if it came out the SAME size, in the same box, it is placed
+        # the same way. Asking `kept` here let one wrapping paragraph stop
+        # the whole page from being skipped with it.
+        edit still = alike and fresh[i] is 0 and not slides(node)
+        loop k in node.children:
+            if same[k] is 0:
+                still = false
+        same = set(same, i, if still then 1 else 0)
+    Sizes{box: box, wraps: wraps, styles: styles, same: same}
+
+# A box whose contents move without its properties changing - which is to
+# say: one that is scrolling RIGHT NOW.
+#
+# A scroll eases, so the box keeps its properties while what is inside it
+# travels. That is why a scroller cannot be skipped, and because the flag
+# walks up the tree, one scrolling list stops the whole page from being
+# skipped with it.
+#
+# But only while it is on its way. A scroll that has arrived where it was
+# asked to be moves nothing, and then the page is as still as it looks.
+define slides(node: Node) -> truth:
+    who = node_name(node)
+    if who is "":
+        return false
+    at_scale = scale_now()
+    sx = prop_val(node, "scroll_x")
+    sy = prop_val(node, "scroll_y")
+    if sx is not "" and not landed("{who}|sx", big(number_in(sx), at_scale)):
+        return true
+    sy is not "" and not landed("{who}|sy", big(number_in(sy), at_scale))
 
 # Which subtrees drew what they drew: the node is what it was, it ended up
 # where it was, and so did everything below it.
@@ -1229,7 +1297,7 @@ public define next_frame(before: Frame, doc: SemanticDocument, theme: Theme, fac
     if n is 0 or n is not length(before.doc.nodes) or not same_theme(theme, before.dress):
         return first_frame(doc, theme, face, room)
     sizes = measure_again(doc, theme, face, before.doc, before.sizes)
-    placed = place_all(doc, theme, face, sizes, room)
+    placed = place_from(doc, theme, face, sizes, room, before.placed)
     # Every branch that is what it was AND ended up where it was drew what
     # it drew, so its commands are copied out of the frame before instead of
     # being worked out again. Only what changed is painted.

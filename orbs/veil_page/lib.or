@@ -4,80 +4,196 @@
 # for someone else to read. That costs a serialise on this side and a parse
 # on the other, every frame, for a list that is six hundred commands long.
 #
-# This is the seam without the middle: eleven host functions, one per draw
-# command, called as the list is walked. On the wasm backend an `external
-# define` becomes an `env.*` import, so the page supplies these and IS the
-# renderer. Nothing is encoded and nothing is parsed - a rectangle crosses
-# as four numbers.
+# This is the seam without the middle: the whole frame as two blocks of
+# numbers and ONE call. On the wasm backend an `external define` becomes an
+# `env.*` import, so the page supplies that one function and IS the
+# renderer. Nothing is encoded and nothing is parsed.
 #
-# It is the same eleven commands every other backend gets, which is the
-# point: a page that draws all of them draws every veil program there is.
+# It began as eleven host functions, one per draw command, called as the
+# list was walked. Measured, those hundred and fifty crossings and the
+# strings they carried were most of what a frame cost once the layout was
+# cheap - clipping the canvas down to one pixel only took a tenth of a
+# millisecond off, so it was never the drawing. So they are gone, and what
+# is left is the block below.
 
 use ori_geometry
 use ori_display
+use veil_motion
 
-external define page_rect(x: number, y: number, w: number, h: number, colour: text, corners: text) -> int
-external define page_shadow(x: number, y: number, w: number, h: number, colour: text, radius: int, blur: int) -> int
-# A SETTING, not a stack: everything after it is clipped until the next one.
-# A box with no area means no clip, which is how the resolver says "all of it".
-external define page_clip(x: number, y: number, w: number, h: number, radius: int) -> int
-external define page_text(x: number, y: number, content: text, colour: text, size: int) -> int
-external define page_icon(x: number, y: number, icon: text, size: int, colour: text) -> int
-external define page_arc(x: number, y: number, outer: int, thick: int, from_deg: int, to_deg: int, colour: text) -> int
-external define page_path(points: text, colour: text) -> int
-external define page_image(x: number, y: number, path: text, w: int, h: int, tint: text, blend: text) -> int
-external define page_nine(x: number, y: number, w: number, h: number, path: text, corner: int, tint: text, blend: text) -> int
-external define page_sprite(x: number, y: number, path: text, scale: int) -> int
+# --- the whole frame, as numbers --------------------------------------------
+#
+# Two blocks and one call.
+#
+#   cmds   twelve numbers a command, always in the same places
+#   words  the letters, one byte to a number, pointed into by offset
+#
+# A colour is `#rrggbbaa` worked out into a single number here rather than
+# read as text there; the page keeps a table from that number to whatever it
+# needs, and builds each one once ever. A radius is four numbers. What still
+# crosses as letters is the words themselves, which are words.
+#
+# Twelve wide and fixed is not tidiness: it is one instance of a GPU draw
+# call. The page's card renderer reads this block straight into instances
+# and draws the screen with one.
+external define page_frame(cmds: [int], count: int, words: [int]) -> int
 
-# One command, painted. Each case hands its pieces on WHOLE - a box goes as
-# a Rect and is opened one line further down. That is not a style: reading a
-# field off a value bound by a `choose` arm is a thing the wasm backend
-# cannot lower, and this is the shape veil_web already uses next door.
-define out_rect(r: Rect, colour: text, corners: text) -> int:
-    page_rect(r.x, r.y, r.wide, r.high, colour, corners)
-
-define out_shadow(r: Rect, colour: text, rad: int, blur: int) -> int:
-    page_shadow(r.x, r.y, r.wide, r.high, colour, rad, blur)
-
-define out_clip(r: Rect, rad: int) -> int:
-    page_clip(r.x, r.y, r.wide, r.high, rad)
-
-define out_text(p: Point, content: text, colour: text, size: int) -> int:
-    page_text(p.x, p.y, content, colour, size)
-
-define out_icon(p: Point, icon: text, size: int, colour: text) -> int:
-    page_icon(p.x, p.y, icon, size, colour)
-
-define out_arc(mid: Point, outer: int, thick: int, from_deg: int, to_deg: int, colour: text) -> int:
-    page_arc(mid.x, mid.y, outer, thick, from_deg, to_deg, colour)
-
-define out_image(p: Point, path: text, w: int, h: int, tint: text, blend: text) -> int:
-    page_image(p.x, p.y, path, w, h, tint, blend)
-
-define out_nine(r: Rect, path: text, corner: int, tint: text, blend: text) -> int:
-    page_nine(r.x, r.y, r.wide, r.high, path, corner, tint, blend)
-
-define out_sprite(p: Point, path: text, scale: int) -> int:
-    page_sprite(p.x, p.y, path, scale)
-
-define page_one(cmd: DrawCmd) -> int:
-    choose cmd:
-        DrawRect(r, colour, src) then out_rect(r, colour, "0")
-        DrawRoundRect(r, colour, corners, src) then out_rect(r, colour, corners)
-        DrawShadow(r, colour, rad, blur, src) then out_shadow(r, colour, rad, blur)
-        SetClip(r, rad, src) then out_clip(r, rad)
-        DrawText(p, content, colour, size, src) then out_text(p, content, colour, size)
-        DrawIcon(p, icon, size, colour, src) then out_icon(p, icon, size, colour)
-        DrawArc(mid, outer, thick, from_deg, to_deg, colour, src) then out_arc(mid, outer, thick, from_deg, to_deg, colour)
-        DrawPath(points, colour, src) then page_path(points, colour)
-        DrawImage(p, path, w, h, tint, blend, src) then out_image(p, path, w, h, tint, blend)
-        DrawNine(r, path, corner, tint, blend, src) then out_nine(r, path, corner, tint, blend)
-        DrawSprite(p, path, scale, src) then out_sprite(p, path, scale)
-
-# Paint the whole list, in order. The answer is how many commands went out,
-# which is the one number worth having on the other side.
-public define paint_page(list: DisplayList) -> int:
-    edit sent = 0
+# kind: 1 rect  2 shadow  3 clip  4 text  5 icon  6 arc  7 path  8 image
+#       9 nine  10 sprite
+#   0 kind | 1 x | 2 y | 3 w | 4 h | 5 colour | 6..9 four more | 10,11 words
+#
+# For text the four more are: 6 size, 7 the name of the line (see say_out).
+#
+# A colour of -1 means "the letters at 11 say it" - a gradient. -2 means do
+# not paint at all, and the page never has to look.
+public define pack_page(list: DisplayList) -> int:
+    n = length(list.commands)
+    if n is 0:
+        return 0
+    edit cmds = filled(n * 12, 0)
+    edit words = filled(word_room(list) + 1, 0)
+    edit at = 0
+    edit wat = 0
     loop cmd in list.commands:
-        sent = sent + page_one(cmd)
-    sent
+        wat = pack_one(cmds, words, at, wat, cmd)
+        at = at + 12
+    page_frame(cmds, n, words)
+
+# How many letters the whole frame carries, counted before anything is
+# written so both blocks can be made once and written in place.
+define word_room(list: DisplayList) -> int:
+    edit room = 0
+    loop cmd in list.commands:
+        room = room + words_of(cmd)
+    room
+
+define words_of(cmd: DrawCmd) -> int:
+    choose cmd:
+        DrawRect(r, colour, src) then say_room(colour)
+        DrawRoundRect(r, colour, corners, src) then say_room(colour)
+        DrawShadow(r, colour, rad, blur, src) then say_room(colour)
+        SetClip(r, rad, src) then 0
+        DrawText(p, content, colour, size, src) then room_for(content) + say_room(colour)
+        DrawIcon(p, icon, size, colour, src) then room_for(icon) + say_room(colour)
+        DrawArc(mid, outer, thick, from_deg, to_deg, colour, src) then say_room(colour)
+        DrawPath(points, colour, src) then room_for(points) + say_room(colour)
+        DrawImage(p, path, w, h, tint, blend, src) then room_for(path)
+        DrawNine(r, path, corner, tint, blend, src) then room_for(path)
+        DrawSprite(p, path, scale, src) then room_for(path)
+
+# A colour only needs letters when it is not a plain `#rrggbbaa`.
+define say_room(colour: text) -> int:
+    if packed(colour) < 0 and length(colour) > 1 then room_for(colour) else 0
+
+define room_for(t: text) -> int:
+    bytes_count(bytes_of(t)) + 1
+
+# One command. Answers where its letters ended, so the next one knows where
+# to start.
+define pack_one(cmds: [int], words: [int], at: int, wat: int, cmd: DrawCmd) -> int:
+    choose cmd:
+        DrawRect(r, colour, src) then box_out(cmds, words, at, wat, 1, r, colour, 0, 0, 0, 0)
+        DrawRoundRect(r, colour, corners, src) then round_out(cmds, words, at, wat, r, colour, corners)
+        DrawShadow(r, colour, rad, blur, src) then box_out(cmds, words, at, wat, 2, r, colour, rad, blur, 0, 0)
+        SetClip(r, rad, src) then box_out(cmds, words, at, wat, 3, r, "", rad, 0, 0, 0)
+        DrawText(p, content, colour, size, src) then say_out(cmds, words, at, wat, 4, p, content, colour, size)
+        DrawIcon(p, icon, size, colour, src) then say_out(cmds, words, at, wat, 5, p, icon, colour, size)
+        DrawArc(mid, outer, thick, from_deg, to_deg, colour, src) then arc_out(cmds, words, at, wat, mid, outer, thick, from_deg, to_deg, colour)
+        DrawPath(points, colour, src) then say_out(cmds, words, at, wat, 7, no_point(), points, colour, 0)
+        DrawImage(p, path, w, h, tint, blend, src) then art_out(cmds, words, at, wat, 8, p.x, p.y, to_real(w), to_real(h), path, 0)
+        DrawNine(r, path, corner, tint, blend, src) then art_out(cmds, words, at, wat, 9, r.x, r.y, r.wide, r.high, path, corner)
+        DrawSprite(p, path, scale, src) then art_out(cmds, words, at, wat, 10, p.x, p.y, 0.0, 0.0, path, scale)
+
+define no_point() -> Point:
+    Point{x: 0.0, y: 0.0}
+
+define box_out(cmds: [int], words: [int], at: int, wat: int, kind: int, r: Rect, colour: text, a: int, b: int, c: int, d: int) -> int:
+    edit out = cmds
+    out = set(out, at, kind)
+    out = set(out, at + 1, to_whole(r.x))
+    out = set(out, at + 2, to_whole(r.y))
+    out = set(out, at + 3, to_whole(r.wide))
+    out = set(out, at + 4, to_whole(r.high))
+    out = set(out, at + 6, a)
+    out = set(out, at + 7, b)
+    out = set(out, at + 8, c)
+    out = set(out, at + 9, d)
+    out = set(out, at + 10, 0 - 1)
+    ink_out(cmds, words, at, wat, colour)
+
+define round_out(cmds: [int], words: [int], at: int, wat: int, r: Rect, colour: text, corners: text) -> int:
+    four = split(corners, " ")
+    one = number_in(corners)
+    tl = if length(four) >= 4 then number_in(four[0]) else one
+    tr = if length(four) >= 4 then number_in(four[1]) else one
+    br = if length(four) >= 4 then number_in(four[2]) else one
+    bl = if length(four) >= 4 then number_in(four[3]) else one
+    box_out(cmds, words, at, wat, 1, r, colour, tl, tr, br, bl)
+
+# A line also says what line it is. The same words are drawn every single
+# frame, and a reader that keeps a finished row of letters per name never
+# has to read the letters again. The name is what the slot store already
+# hashes text with, and the length sits at the front of the word block, so
+# a reader that checks both cannot serve one line's letters for another's.
+define say_out(cmds: [int], words: [int], at: int, wat: int, kind: int, p: Point, content: text, colour: text, size: int) -> int:
+    edit out = cmds
+    out = set(out, at, kind)
+    out = set(out, at + 1, to_whole(p.x))
+    out = set(out, at + 2, to_whole(p.y))
+    out = set(out, at + 6, size)
+    if kind is 4:
+        out = set(out, at + 7, text_hash(content))
+    after = letters_out(cmds, words, at, 10, wat, content)
+    ink_out(cmds, words, at, after, colour)
+
+define arc_out(cmds: [int], words: [int], at: int, wat: int, mid: Point, outer: int, thick: int, from_deg: int, to_deg: int, colour: text) -> int:
+    edit out = cmds
+    out = set(out, at, 6)
+    out = set(out, at + 1, to_whole(mid.x))
+    out = set(out, at + 2, to_whole(mid.y))
+    out = set(out, at + 6, outer)
+    out = set(out, at + 7, thick)
+    out = set(out, at + 8, from_deg)
+    out = set(out, at + 9, to_deg)
+    out = set(out, at + 10, 0 - 1)
+    ink_out(cmds, words, at, wat, colour)
+
+define art_out(cmds: [int], words: [int], at: int, wat: int, kind: int, x: number, y: number, w: number, h: number, path: text, extra: int) -> int:
+    edit out = cmds
+    out = set(out, at, kind)
+    out = set(out, at + 1, to_whole(x))
+    out = set(out, at + 2, to_whole(y))
+    out = set(out, at + 3, to_whole(w))
+    out = set(out, at + 4, to_whole(h))
+    out = set(out, at + 5, 0 - 2)
+    out = set(out, at + 6, extra)
+    out = set(out, at + 11, 0 - 1)
+    letters_out(cmds, words, at, 10, wat, path)
+
+# A colour goes in as a number when it can, and as letters when it cannot.
+define ink_out(cmds: [int], words: [int], at: int, wat: int, colour: text) -> int:
+    edit out = cmds
+    if length(colour) < 2:
+        out = set(out, at + 5, 0 - 2)
+        out = set(out, at + 11, 0 - 1)
+        return wat
+    packed_now = packed(colour)
+    out = set(out, at + 5, packed_now)
+    if packed_now >= 0:
+        out = set(out, at + 11, 0 - 1)
+        return wat
+    letters_out(cmds, words, at, 11, wat, colour)
+
+# Letters into the word block, and where they start into the command.
+define letters_out(cmds: [int], words: [int], at: int, slot: int, wat: int, t: text) -> int:
+    edit out = cmds
+    b = bytes_of(t)
+    n = bytes_count(b)
+    if n is 0:
+        out = set(out, at + slot, 0 - 1)
+        return wat
+    edit w = words
+    w = set(w, wat, n)
+    loop i in 0 until n:
+        w = set(w, wat + 1 + i, byte_at(b, i))
+    out = set(out, at + slot, wat)
+    wat + n + 1

@@ -24,8 +24,21 @@ public type Measured: node_id: int, rect: Rect
 #
 # The answer is two whole numbers, so it fits in one: width in the high half,
 # height in the low. Nothing here can be wider than 65535 pixels.
+# What a measured line is remembered under.
+#
+# It used to be the whole line: "tm:13:Rad 1 - en rad vars namn ar alldeles
+# for langt". A screen measures five hundred lines, and three quarters of
+# what a REMEMBERED measurement cost was that key - forty five bytes hashed
+# on the way out and compared byte for byte on the way back, to look up
+# something already known.
+#
+# A hash and a length instead. Native texts carry their hash in their own
+# header, so asking twice is a load; wasm works it out in the same thirteen
+# instructions a slot key is hashed with. Two lines share a name only if
+# they are the same length AND hash alike, which for the few hundred lines
+# on a screen is not something that happens.
 define measured_key(content: text, size_px: int) -> text:
-    "tm:{size_px}:{content}"
+    "tm:{size_px}:{length(content)}:{text_hash(content)}"
 
 public define text_size(content: text, size_px: int, face: Font) -> Size:
     # ONE lookup, not two. A slot nobody set answers 0 on every backend, so
@@ -307,7 +320,7 @@ public define caret_from(content: text, size_px: int, face: Font, max_w: int, px
 # once to size the box, once to place it, once to draw it. Thirty of these a
 # screen, and each one was twenty-five word measurements.
 public define wrapped_high(content: text, size_px: int, face: Font, max_w: int) -> int:
-    memo = "wh:{size_px}:{max_w}:{content}"
+    memo = "wh:{size_px}:{max_w}:{length(content)}:{text_hash(content)}"
     seen = slot_get_int(memo)
     if seen > 0:
         return seen - 1
@@ -354,7 +367,7 @@ public define caret_at(content: text, size_px: int, face: Font, x: int) -> int:
 # paragraph that reported its whole unbroken line made every ancestor
 # claim a width no one was going to give it.
 public define widest_word(content: text, size_px: int, face: Font) -> int:
-    memo = "ww:{size_px}:{content}"
+    memo = "ww:{size_px}:{length(content)}:{text_hash(content)}"
     seen = slot_get_int(memo)
     if seen > 0:
         return seen - 1

@@ -345,46 +345,64 @@ public define frame(what: int, x: int, y: int, code: int, mods: int) -> int:
     now_lit = slot_get_int("veil:bright") * 2 + slot_get_int("veil:contrast")
     wearing = if now_lit is was_lit then dress else gallery_theme()
     told = if moved_on then first_frame(gallery_doc(held_gallery()), wearing, face, box()) else here
-    paint_page(told.list)
+    pack_page(told.list)
 
 # The same frame, told from the one before. A struct crosses an export as a
 # pointer, so the page holds the last one as a plain number and hands it
 # back - and it keeps TWO arenas, winding back the one this frame is not
 # reading, so what `before` points at is still there.
-# --- why a frame told from the one before does not pay ----------------------
+# --- a frame told from the one before ---------------------------------------
 #
-# It was built, twice, and measured both times. Writing down what it costs
-# so nobody builds it a third time.
+# Two things make it possible, and neither touches the compiler.
 #
-# HOLDING one is not the problem, and neither is the memory. A struct crosses
-# an export as a POINTER, so the page can keep the last frame as a plain
-# number and hand it back. And `orion_persist_on` is a host import here, so
-# the page can make it mean something: park the frame pointer, allocate from
-# a second region it does not wind back. That works - it wants counting
-# rather than toggling, because `font_body` opens a kept scope inside one
-# that is already open.
+# A struct crosses an export as a POINTER, so the page holds the last frame
+# as a plain number and hands it back.
 #
-# The chain is not the problem either. A told frame copies commands that
-# point at words the frame before allocated, so the chain of frames it needs
-# is unbounded and no fixed number of arenas is sound - but the chain can be
-# CUT: let the kept region only grow, empty it when it is nearly full, and
-# take one cold frame, which is the one frame that needs no chain.
+# And `orion_persist_on` is a host import here, so the page decides what it
+# means: park the frame pointer, allocate from a second region it does not
+# wind back. Everything a told frame builds lives there, and the frame
+# before it is still whole. It wants COUNTING rather than toggling, because
+# `font_body` opens a kept scope inside one that is already open.
 #
-# All of that was built and it ran: three hundred and twenty nine told frames
-# against a hundred and eleven cold ones, thirty three kilobytes a frame
-# instead of five hundred and thirty six.
-#
-# And it was worth NOTHING. 1.3 ms with it, 1.3 ms without.
-#
-# The reason is in `next_frame` itself: it always RE-PLACES, and only the
-# painting is reused. Painting is two fifths of a frame, and comparing a
-# hundred and sixty one nodes against the ones before them to find out what
-# may be reused costs most of that back.
-#
-# So the thing worth building is not a told frame. It is a layout that skips
-# a subtree whose inputs did not change - `steady_below` already does exactly
-# that for painting, and nothing does it for measuring or placing. THAT is
-# where the two fifths that are left actually are.
+# A told frame copies commands that point at words the frame BEFORE
+# allocated, so the chain of frames it needs is unbounded and no fixed
+# number of arenas is sound. The chain is cut instead: the kept region only
+# grows, and when it is nearly full the page empties it and takes one cold
+# frame - the one frame that needs no chain behind it.
+
+public define blank() -> Frame:
+    on = orion_persist_on()
+    it = first_frame(SemanticDocument{root: 0, nodes: []}, gallery_theme(), font_body(), box())
+    off = orion_persist_off()
+    it
+
+# The same frame `frame` builds, told from the one before.
+public define told(before: Frame, what: int, x: int, y: int, code: int, mods: int) -> Frame:
+    on = orion_persist_on()
+    face = font_body()
+    # The theme the frame before was built with is still there - it is in
+    # the kept region, hanging off that frame. Building it again is the
+    # second most expensive thing a frame does after the layout, and it
+    # only ever changes when the two buttons that change it are pressed.
+    # So it is built again only then, and the frame carries it the rest of
+    # the time.
+    was_lit = slot_get_int("veil:bright") * 2 + slot_get_int("veil:contrast")
+    dress = if was_lit is slot_get_int("g:dress_lit") and length(before.dress.rules) > 0 then before.dress else fresh_dress(was_lit)
+    g = held_gallery()
+    doc = gallery_doc(g)
+    here = next_frame(before, doc, dress, face, box())
+    moved_on = handled(g, doc, dress, face, here, what, x, y, code, mods)
+    now_lit = slot_get_int("veil:bright") * 2 + slot_get_int("veil:contrast")
+    wearing = if now_lit is was_lit then dress else fresh_dress(now_lit)
+    after = if moved_on then next_frame(here, gallery_doc(held_gallery()), wearing, face, box()) else here
+    put = pack_page(after.list)
+    off = orion_persist_off()
+    after
+
+# A theme, and a note of which palette it was built for.
+define fresh_dress(lit: int) -> Theme:
+    put = slot_set("g:dress_lit", lit)
+    gallery_theme()
 
 # --- what an incremental frame would be worth ------------------------------
 # A frame told from the one before is the whole point of `next_frame`, and

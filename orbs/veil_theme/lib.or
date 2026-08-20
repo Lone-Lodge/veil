@@ -51,9 +51,30 @@ public define lookup_state(theme: Theme, role: Role, state: text) -> StyleRule:
             exact = true
     found
 
+# Where a role's rule SITS, remembered - and checked.
+#
+# A theme is sixty rules and a screen asks it once per node, twice if the
+# painter asks again. Walking the list to the right one was a third of the
+# layout: measured, 0.44 microseconds a node, against 0.026 for asking the
+# store where it was last time.
+#
+# A theme is built fresh every frame but always the same shape, so the place
+# a role sat in is nearly always the place it still sits. Nearly is not good
+# enough, so the answer is looked at before it is trusted: wrong index, or a
+# shorter list than last time, and it falls back to the walk and remembers
+# the new place. A theme that changed shape costs one slow lookup per role,
+# once.
 define plain_rule(theme: Theme, name: text) -> StyleRule:
+    was = slot_get_int("veil:at:{name}")
+    if was > 0 and was <= length(theme.rules):
+        there = theme.rules[was - 1]
+        if there.role_name is name:
+            return there
+    edit at = 0
     loop rule in theme.rules:
+        at = at + 1
         if rule.role_name is name:
+            put = slot_set("veil:at:{name}", at)
             return rule
     nothing_rule(name)
 
