@@ -73,11 +73,11 @@ define looking(g: Gallery, hover: text, page: int, at_second: number) -> Gallery
 
 define first_line(req: text) -> text:
     ls = lines(req)
-    if length(ls) == 0 then "" else at(ls, 0)
+    if length(ls) is 0 then "" else ls[0]
 
 define wanted_path(req: text) -> text:
     parts = split(first_line(req), " ")
-    if length(parts) < 2 then "/" else at(parts, 1)
+    if length(parts) < 2 then "/" else parts[1]
 
 # The value of one query field, "" when it is not there.
 define field(path: text, key: text) -> text:
@@ -85,10 +85,10 @@ define field(path: text, key: text) -> text:
     if length(q) < 2:
         return ""
     edit found = ""
-    loop pair in split(at(q, 1), "&"):
+    loop pair in split(q[1], "&"):
         kv = split(pair, "=")
-        if length(kv) == 2 and at(kv, 0) is key:
-            found = at(kv, 1)
+        if length(kv) is 2 and kv[0] is key:
+            found = kv[1]
     found
 
 define number_of(t: text) -> int:
@@ -96,9 +96,9 @@ define number_of(t: text) -> int:
     n = bytes_count(b)
     edit acc = 0
     edit neg = false
-    loop i in 0..<n:
+    loop i in 0 until n:
         c = byte_at(b, i)
-        if c == 45 and i == 0:
+        if c is 45 and i is 0:
             neg = true
         if c >= 48 and c <= 57:
             acc = acc * 10 + (c - 48)
@@ -119,7 +119,7 @@ define after(t: text, from: int) -> text:
 
 define last_part(whole: text) -> text:
     parts = split(whole, ":")
-    if length(parts) == 0 then whole else at(parts, length(parts) - 1)
+    if length(parts) is 0 then whole else parts[length(parts) - 1]
 
 # Which tab a name like "tab:docka" asks for, or -1 for none.
 define tab_wanted(name: text) -> int:
@@ -267,7 +267,7 @@ define main() -> int:
                 if what is "key" and now.typing:
                     line = edit_key(line, number_of(field(path, "code")), field(path, "ctrl") is "1", field(path, "shift") is "1", false)
                 now = typed_into(now, line)
-                moved_on = hover is not was_hover or at_page != was_page or what is "down" or what is "drag" or what is "char" or what is "key" or what is "up"
+                moved_on = hover is not was_hover or at_page is not was_page or what is "down" or what is "drag" or what is "char" or what is "key" or what is "up"
 
                 if what is "move" and said_once and not moved_on:
                     was_frame = here

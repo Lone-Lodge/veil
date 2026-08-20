@@ -16,7 +16,7 @@ public type SemanticDocument: root: int, nodes: [Node]
 public define node_do(node: Node) -> text:
     edit act = ""
     loop prop in node.props:
-        if prop.key == "do":
+        if prop.key is "do":
             act = prop.content
     act
 
@@ -24,7 +24,7 @@ public define node_do(node: Node) -> text:
 public define doc_speaks(doc: SemanticDocument, name: text) -> truth:
     edit found = false
     loop node in doc.nodes:
-        if node_do(node) == name:
+        if node_do(node) is name:
             found = true
     found
 

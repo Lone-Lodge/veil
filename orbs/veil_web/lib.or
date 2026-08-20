@@ -23,7 +23,7 @@ public define display_list_json(list: DisplayList) -> text:
     edit pieces = []
     loop cmd in list.commands:
         piece = cmd_json(cmd)
-        if piece != "":
+        if piece is not "":
             pieces = append(pieces, piece)
     "\{\"commands\":[" + join(pieces, ",") + "]\}"
 
@@ -33,22 +33,22 @@ public define display_list_json(list: DisplayList) -> text:
 # seam that renders a different program.
 define cmd_json(cmd: DrawCmd) -> text:
     choose cmd:
-        DrawRect(r, colour, src) -> rect_json(r, colour, "0", src)
-        DrawRoundRect(r, colour, corners, src) -> rect_json(r, colour, corners, src)
-        DrawShadow(r, colour, rad, blur, src) -> shadow_json(r, colour, rad, blur, src)
+        DrawRect(r, colour, src) then rect_json(r, colour, "0", src)
+        DrawRoundRect(r, colour, corners, src) then rect_json(r, colour, corners, src)
+        DrawShadow(r, colour, rad, blur, src) then shadow_json(r, colour, rad, blur, src)
         # A clip and its release are both events in a stream, so both are
         # said. A negative box is the release.
-        SetClip(r, rad, src) -> clip_json(r, rad, src)
-        DrawText(p, content, colour, size, src) -> text_json(p, content, colour, size, src)
-        DrawIcon(p, icon, size, colour, src) -> icon_json(p, icon, size, colour, src)
+        SetClip(r, rad, src) then clip_json(r, rad, src)
+        DrawText(p, content, colour, size, src) then text_json(p, content, colour, size, src)
+        DrawIcon(p, icon, size, colour, src) then icon_json(p, icon, size, colour, src)
         # A ring is an arc in SVG or a conic gradient in CSS; either way
         # the web needs the numbers, not a rectangle standing in for them.
-        DrawArc(mid, outer, thick, from_deg, to_deg, colour, src) -> arc_json(mid, outer, thick, from_deg, to_deg, colour, src)
+        DrawArc(mid, outer, thick, from_deg, to_deg, colour, src) then arc_json(mid, outer, thick, from_deg, to_deg, colour, src)
         # CSS border-image IS a nine-slice, so this one crosses whole.
-        DrawNine(r, path, corner, tint, blend, src) -> nine_json(r, path, corner, tint, blend, src)
-        DrawPath(points, colour, src) -> path_json(points, colour, src)
-        DrawImage(p, path, w, h, tint, blend, src) -> image_json(p, path, w, h, tint, src)
-        DrawSprite(p, path, scale, src) -> sprite_json(p, path, scale, src)
+        DrawNine(r, path, corner, tint, blend, src) then nine_json(r, path, corner, tint, blend, src)
+        DrawPath(points, colour, src) then path_json(points, colour, src)
+        DrawImage(p, path, w, h, tint, blend, src) then image_json(p, path, w, h, tint, src)
+        DrawSprite(p, path, scale, src) then sprite_json(p, path, scale, src)
 
 define shadow_json(r: Rect, colour: text, rad: int, blur: int, src: int) -> text:
     "\{\"kind\":\"shadow\",\"x\":{r.x},\"y\":{r.y},\"w\":{r.wide},\"h\":{r.high},\"radius\":{rad},\"blur\":{blur},\"src\":{src},\"color\":\"" + colour + "\"\}"

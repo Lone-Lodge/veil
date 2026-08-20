@@ -1,0 +1,83 @@
+# veil_page - a display list painted straight into a page.
+#
+# The other way out of veil is veil_web, which turns a DisplayList into JSON
+# for someone else to read. That costs a serialise on this side and a parse
+# on the other, every frame, for a list that is six hundred commands long.
+#
+# This is the seam without the middle: eleven host functions, one per draw
+# command, called as the list is walked. On the wasm backend an `external
+# define` becomes an `env.*` import, so the page supplies these and IS the
+# renderer. Nothing is encoded and nothing is parsed - a rectangle crosses
+# as four numbers.
+#
+# It is the same eleven commands every other backend gets, which is the
+# point: a page that draws all of them draws every veil program there is.
+
+use ori_geometry
+use ori_display
+
+external define page_rect(x: number, y: number, w: number, h: number, colour: text, corners: text) -> int
+external define page_shadow(x: number, y: number, w: number, h: number, colour: text, radius: int, blur: int) -> int
+# A SETTING, not a stack: everything after it is clipped until the next one.
+# A box with no area means no clip, which is how the resolver says "all of it".
+external define page_clip(x: number, y: number, w: number, h: number, radius: int) -> int
+external define page_text(x: number, y: number, content: text, colour: text, size: int) -> int
+external define page_icon(x: number, y: number, icon: text, size: int, colour: text) -> int
+external define page_arc(x: number, y: number, outer: int, thick: int, from_deg: int, to_deg: int, colour: text) -> int
+external define page_path(points: text, colour: text) -> int
+external define page_image(x: number, y: number, path: text, w: int, h: int, tint: text, blend: text) -> int
+external define page_nine(x: number, y: number, w: number, h: number, path: text, corner: int, tint: text, blend: text) -> int
+external define page_sprite(x: number, y: number, path: text, scale: int) -> int
+
+# One command, painted. Each case hands its pieces on WHOLE - a box goes as
+# a Rect and is opened one line further down. That is not a style: reading a
+# field off a value bound by a `choose` arm is a thing the wasm backend
+# cannot lower, and this is the shape veil_web already uses next door.
+define out_rect(r: Rect, colour: text, corners: text) -> int:
+    page_rect(r.x, r.y, r.wide, r.high, colour, corners)
+
+define out_shadow(r: Rect, colour: text, rad: int, blur: int) -> int:
+    page_shadow(r.x, r.y, r.wide, r.high, colour, rad, blur)
+
+define out_clip(r: Rect, rad: int) -> int:
+    page_clip(r.x, r.y, r.wide, r.high, rad)
+
+define out_text(p: Point, content: text, colour: text, size: int) -> int:
+    page_text(p.x, p.y, content, colour, size)
+
+define out_icon(p: Point, icon: text, size: int, colour: text) -> int:
+    page_icon(p.x, p.y, icon, size, colour)
+
+define out_arc(mid: Point, outer: int, thick: int, from_deg: int, to_deg: int, colour: text) -> int:
+    page_arc(mid.x, mid.y, outer, thick, from_deg, to_deg, colour)
+
+define out_image(p: Point, path: text, w: int, h: int, tint: text, blend: text) -> int:
+    page_image(p.x, p.y, path, w, h, tint, blend)
+
+define out_nine(r: Rect, path: text, corner: int, tint: text, blend: text) -> int:
+    page_nine(r.x, r.y, r.wide, r.high, path, corner, tint, blend)
+
+define out_sprite(p: Point, path: text, scale: int) -> int:
+    page_sprite(p.x, p.y, path, scale)
+
+define page_one(cmd: DrawCmd) -> int:
+    choose cmd:
+        DrawRect(r, colour, src) then out_rect(r, colour, "0")
+        DrawRoundRect(r, colour, corners, src) then out_rect(r, colour, corners)
+        DrawShadow(r, colour, rad, blur, src) then out_shadow(r, colour, rad, blur)
+        SetClip(r, rad, src) then out_clip(r, rad)
+        DrawText(p, content, colour, size, src) then out_text(p, content, colour, size)
+        DrawIcon(p, icon, size, colour, src) then out_icon(p, icon, size, colour)
+        DrawArc(mid, outer, thick, from_deg, to_deg, colour, src) then out_arc(mid, outer, thick, from_deg, to_deg, colour)
+        DrawPath(points, colour, src) then page_path(points, colour)
+        DrawImage(p, path, w, h, tint, blend, src) then out_image(p, path, w, h, tint, blend)
+        DrawNine(r, path, corner, tint, blend, src) then out_nine(r, path, corner, tint, blend)
+        DrawSprite(p, path, scale, src) then out_sprite(p, path, scale)
+
+# Paint the whole list, in order. The answer is how many commands went out,
+# which is the one number worth having on the other side.
+public define paint_page(list: DisplayList) -> int:
+    edit sent = 0
+    loop cmd in list.commands:
+        sent = sent + page_one(cmd)
+    sent

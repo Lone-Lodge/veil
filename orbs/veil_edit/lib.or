@@ -142,7 +142,7 @@ public define edit_delete(e: Edit) -> Edit:
     if edit_has_selection(e):
         return edit_drop(e)
     fwd = edit_right(e)
-    if fwd.caret == e.caret:
+    if fwd.caret is e.caret:
         return e
     Edit{content: "{edit_before(e)}{edit_after(fwd)}", caret: e.caret, anchor: e.caret}
 
@@ -150,7 +150,7 @@ public define edit_clear() -> Edit:
     Edit{content: "", caret: 0, anchor: 0}
 
 public define edit_empty(e: Edit) -> truth:
-    length(e.content) == 0
+    length(e.content) is 0
 
 # The caret is visible for the first half of every half-second. One place,
 # so every field in every app blinks together instead of each app inventing
@@ -163,7 +163,7 @@ public define caret_lit(seconds: number) -> truth:
 # you dragged, so everything below works off the ordered pair.
 
 public define edit_has_selection(e: Edit) -> truth:
-    e.caret != e.anchor
+    e.caret is not e.anchor
 
 define sel_from(e: Edit) -> int:
     if e.caret < e.anchor then e.caret else e.anchor
@@ -209,7 +209,7 @@ public define edit_reach(e: Edit, at_i: int) -> Edit:
     Edit{content: e.content, caret: clamp_at(at_i, bytes_count(bytes_of(e.content))), anchor: e.anchor}
 
 # The word around the caret, selected. What a double click does.
-define is_space(c: int) -> truth = c == 32 or c == 9
+define is_space(c: int) -> truth = c is 32 or c is 9
 
 public define edit_word(e: Edit) -> Edit:
     b = bytes_of(e.content)
@@ -245,16 +245,16 @@ public define edit_break(e: Edit) -> Edit:
 public define edit_row(e: Edit) -> int:
     b = bytes_of(edit_before(e))
     edit rows = 0
-    loop i in 0..<bytes_count(b):
-        if byte_at(b, i) == 10:
+    loop i in 0 until bytes_count(b):
+        if byte_at(b, i) is 10:
             rows = rows + 1
     rows
 
 public define edit_col(e: Edit) -> int:
     b = bytes_of(edit_before(e))
     edit last = 0 - 1
-    loop i in 0..<bytes_count(b):
-        if byte_at(b, i) == 10:
+    loop i in 0 until bytes_count(b):
+        if byte_at(b, i) is 10:
             last = i
     bytes_count(b) - last - 1
 
@@ -264,10 +264,10 @@ define line_start(e: Edit, row: int) -> int:
     b = bytes_of(e.content)
     edit seen = 0
     edit at_i = bytes_count(b)
-    loop i in 0..<bytes_count(b):
-        if byte_at(b, i) == 10:
+    loop i in 0 until bytes_count(b):
+        if byte_at(b, i) is 10:
             seen = seen + 1
-            if seen == row and at_i == bytes_count(b):
+            if seen is row and at_i is bytes_count(b):
                 at_i = i + 1
     at_i
 
@@ -277,7 +277,7 @@ define line_len(e: Edit, row: int) -> int:
     from = line_start(e, row)
     edit i = from
     loop:
-        if i >= n or byte_at(b, i) == 10:
+        if i >= n or byte_at(b, i) is 10:
             break
         i = i + 1
     i - from
@@ -285,8 +285,8 @@ define line_len(e: Edit, row: int) -> int:
 define rows_in(e: Edit) -> int:
     b = bytes_of(e.content)
     edit rows = 0
-    loop i in 0..<bytes_count(b):
-        if byte_at(b, i) == 10:
+    loop i in 0 until bytes_count(b):
+        if byte_at(b, i) is 10:
             rows = rows + 1
     rows
 
@@ -329,7 +329,7 @@ public define edit_paste(e: Edit, t: text) -> Edit:
 # eye expects it and is the same rule punctuation follows.
 
 define is_word(c: int) -> truth:
-    not is_space(c) and c != 10 and c != 13
+    not is_space(c) and c is not 10 and c is not 13
 
 public define edit_word_left(e: Edit) -> Edit:
     b = bytes_of(e.content)
@@ -389,7 +389,7 @@ public define edit_erase_word(e: Edit) -> Edit:
 # field is inside, not to the field.
 
 define key_moves(key: int) -> truth:
-    key == 37 or key == 39 or key == 38 or key == 40 or key == 36 or key == 35
+    key is 37 or key is 39 or key is 38 or key is 40 or key is 36 or key is 35
 
 public define edit_key(e: Edit, key: int, ctrl: truth, shift: truth, breaks: truth) -> Edit:
     after = edit_pressed(e, key, ctrl, breaks)
@@ -398,25 +398,25 @@ public define edit_key(e: Edit, key: int, ctrl: truth, shift: truth, breaks: tru
     if shift and key_moves(key) then edit_hold(e, after) else after
 
 define edit_pressed(e: Edit, key: int, ctrl: truth, breaks: truth) -> Edit:
-    if key == 37:
+    if key is 37:
         return if ctrl then edit_word_left(e) else edit_left(e)
-    if key == 39:
+    if key is 39:
         return if ctrl then edit_word_right(e) else edit_right(e)
-    if key == 38:
+    if key is 38:
         return edit_up(e)
-    if key == 40:
+    if key is 40:
         return edit_down(e)
-    if key == 36:
+    if key is 36:
         return if ctrl then edit_home(e) else edit_line_home(e)
-    if key == 35:
+    if key is 35:
         return if ctrl then edit_end(e) else edit_line_end(e)
-    if key == 8:
+    if key is 8:
         return if ctrl then edit_erase_word(e) else edit_erase(e)
-    if key == 46:
+    if key is 46:
         return edit_delete(e)
-    if key == 13:
+    if key is 13:
         return if breaks then edit_break(e) else e
     # Ctrl+A. The one key with a letter on it that is not typing.
-    if key == 65 and ctrl:
+    if key is 65 and ctrl:
         return edit_all(e)
     e

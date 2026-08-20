@@ -30,7 +30,7 @@ public define signal_int(store: SignalStore, initial: int) -> SignalAlloc:
 public define signal_get(store: SignalStore, id: int) -> int:
     edit found = 0
     loop cell in store.cells:
-        if cell.id == id:
+        if cell.id is id:
             found = cell.value
     found
 
@@ -38,7 +38,7 @@ public define signal_get(store: SignalStore, id: int) -> int:
 public define signal_set(store: SignalStore, id: int, new_value: int) -> SignalStore:
     edit out = []
     loop cell in store.cells:
-        if cell.id == id:
+        if cell.id is id:
             out = append(out, IntCell{id: cell.id, value: new_value, dirty: true})
         else:
             out = append(out, cell)

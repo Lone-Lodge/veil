@@ -55,7 +55,7 @@ public define smooth(key: text, target: int) -> int:
         mark = slot_set(kt, now)
         return target
     at_now = slot_get_int(kv)
-    if at_now == target:
+    if at_now is target:
         rest = slot_set(kt, now)
         return target
     step = now - slot_get_int(kt)
@@ -73,7 +73,7 @@ public define smooth(key: text, target: int) -> int:
     # where it was so the time keeps accumulating - which is also what
     # makes asking twice within one frame give the same answer twice, and
     # the resolver does ask twice: once to place, once to draw.
-    if moved == 0:
+    if moved is 0:
         return at_now
     now_at = at_now + moved
     kept = slot_set(kv, now_at)
@@ -86,7 +86,7 @@ public define smooth(key: text, target: int) -> int:
 # is too - an app that had to keep its own would end up with one timer per
 # control, all slightly out of step.
 public define hovered_for(name: text) -> int:
-    if name == "":
+    if name is "":
         return 0
     k = "veil:h:{name}"
     now = monotonic_ms()
@@ -97,7 +97,7 @@ public define hovered_for(name: text) -> int:
 
 # The pointer left, so the count starts over next time.
 public define hover_left(name: text) -> int:
-    if name != "":
+    if name is not "":
         slot_set("veil:h:{name}", monotonic_ms())
     0
 
@@ -124,7 +124,7 @@ define hex2(b: [int], i: int) -> int:
 public define packed(c: text) -> int:
     b = bytes_of(c)
     n = bytes_count(b)
-    if n < 7 or byte_at(b, 0) != 35:
+    if n < 7 or byte_at(b, 0) is not 35:
         return 0 - 1
     r = hex2(b, 1)
     g = hex2(b, 3)
@@ -153,14 +153,14 @@ public define unpacked(v: int) -> text:
 # and written together, which is where the cost was.
 
 define chan(v: int, i: int) -> int:
-    if i == 0 then v // 16777216 % 256 else if i == 1 then v // 65536 % 256 else if i == 2 then v // 256 % 256 else v % 256
+    if i is 0 then v // 16777216 % 256 else if i is 1 then v // 65536 % 256 else if i is 2 then v // 256 % 256 else v % 256
 
 define toward(now_at: int, want: int, step: int) -> int:
     gap = want - now_at
-    if gap == 0:
+    if gap is 0:
         return want
     moved = gap * step // ease_ms()
-    if moved == 0 then now_at else now_at + moved
+    if moved is 0 then now_at else now_at + moved
 
 # NO colour is treated as the colour it was, at zero alpha. Without that a
 # look that comes and goes only fades one way: in on arrival and gone the
@@ -169,13 +169,13 @@ define toward(now_at: int, want: int, step: int) -> int:
 public define smooth_colour(key: text, target: text) -> text:
     lit = packed(target)
     # A gradient or a name has no channels to walk.
-    if lit < 0 and target != "":
+    if lit < 0 and target is not "":
         return target
     kv = "veil:m:c:{key}"
     if not slot_has(kv):
         # Nothing there and nothing asked for: nothing to draw, and
         # nothing worth remembering.
-        if target == "":
+        if target is "":
             return ""
         # A colour asked for the FIRST time is simply there. Arriving is
         # not a change.
@@ -184,17 +184,17 @@ public define smooth_colour(key: text, target: text) -> text:
         return target
     at_now = slot_get_int(kv)
     # Fading out keeps the colour and takes the alpha away.
-    want = if target == "" then at_now // 256 * 256 else lit
-    if at_now == want:
+    want = if target is "" then at_now // 256 * 256 else lit
+    if at_now is want:
         rest = slot_set("veil:m:d:{key}", monotonic_ms())
-        return if want % 256 == 0 then "" else unpacked(want)
+        return if want % 256 is 0 then "" else unpacked(want)
     now = monotonic_ms()
     step = now - slot_get_int("veil:m:d:{key}")
     if step >= ease_ms() or step < 0:
         done = slot_set(kv, want)
         mark = slot_set("veil:m:d:{key}", now)
         live = stamp(now)
-        return if want % 256 == 0 then "" else unpacked(want)
+        return if want % 256 is 0 then "" else unpacked(want)
     r = toward(chan(at_now, 0), chan(want, 0), step)
     g = toward(chan(at_now, 1), chan(want, 1), step)
     b = toward(chan(at_now, 2), chan(want, 2), step)
@@ -203,9 +203,9 @@ public define smooth_colour(key: text, target: text) -> text:
     # Not enough time has passed to move a whole step anywhere. The clock
     # stays put so the time keeps accumulating, which is also what makes
     # asking twice in one frame answer twice the same.
-    if moved_to == at_now:
-        return if at_now % 256 == 0 then "" else unpacked(at_now)
+    if moved_to is at_now:
+        return if at_now % 256 is 0 then "" else unpacked(at_now)
     kept = slot_set(kv, moved_to)
     mark = slot_set("veil:m:d:{key}", now)
     live = stamp(now)
-    if moved_to % 256 == 0 then "" else unpacked(moved_to)
+    if moved_to % 256 is 0 then "" else unpacked(moved_to)

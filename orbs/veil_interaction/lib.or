@@ -11,13 +11,13 @@ public type Interaction:
 # Every Interaction variant is reachable — the resolver's pick_node then
 # turns a PressAt/ReleaseAt into the node it hit.
 public define classify(kind: text, x: int, y: int) -> Interaction:
-    if kind == "key_down":
+    if kind is "key_down":
         KeyPress(x)
     else:
-        if kind == "mouse_up" or kind == "release":
+        if kind is "mouse_up" or kind is "release":
             ReleaseAt(x, y)
         else:
-            if kind == "scroll":
+            if kind is "scroll":
                 Scroll(x)
             else:
                 PressAt(x, y)

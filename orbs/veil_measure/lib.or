@@ -67,7 +67,7 @@ define text_size_slow(content: text, size_px: int, face: Font) -> Size:
         wide = wide + to_real(advance_width(face, g)) * scale
         prev = g
         i = i + cp_step(letters, i)
-    high = if bytes_count(letters) == 0 then 0.0 else to_real(font_ascent(face) - font_descent(face)) * scale
+    high = if bytes_count(letters) is 0 then 0.0 else to_real(font_ascent(face) - font_descent(face)) * scale
     Size{wide: to_whole(wide + 0.5), high: to_whole(high + 0.5)}
 
 # The height of one line of this face at this size. Wrapping needs it, and
@@ -102,17 +102,17 @@ public define plain_of(content: text) -> text:
     loop:
         if i >= n:
             break
-        if byte_at(b, i) == marker_open():
+        if byte_at(b, i) is marker_open():
             edit j = i
             loop:
-                if j >= n or byte_at(b, j) == marker_shut():
+                if j >= n or byte_at(b, j) is marker_shut():
                     break
                 j = j + 1
             i = j + 1
         else:
             edit j = i
             loop:
-                if j >= n or byte_at(b, j) == marker_open():
+                if j >= n or byte_at(b, j) is marker_open():
                     break
                 j = j + 1
             out = "{out}{text_of(bytes_part(b, i, j))}"
@@ -121,8 +121,8 @@ public define plain_of(content: text) -> text:
 
 public define has_runs(b: [int], n: int) -> truth:
     edit any = false
-    loop i in 0..<n:
-        if byte_at(b, i) == marker_open():
+    loop i in 0 until n:
+        if byte_at(b, i) is marker_open():
             any = true
     any
 
@@ -137,10 +137,10 @@ public define runs_of(content: text) -> [text]:
     loop:
         if i >= n:
             break
-        if byte_at(b, i) == marker_open():
+        if byte_at(b, i) is marker_open():
             edit j = i + 1
             loop:
-                if j >= n or byte_at(b, j) == marker_shut():
+                if j >= n or byte_at(b, j) is marker_shut():
                     break
                 j = j + 1
             # `[]` closes and goes back to the node's own ink.
@@ -149,7 +149,7 @@ public define runs_of(content: text) -> [text]:
         else:
             edit j = i
             loop:
-                if j >= n or byte_at(b, j) == marker_open():
+                if j >= n or byte_at(b, j) is marker_open():
                     break
                 j = j + 1
             if j > i:
@@ -225,7 +225,7 @@ public define wrap_text(content: text, size_px: int, face: Font, max_w: int) -> 
     wrap_one(content, size_px, face, max_w)
 
 define wrap_one(content: text, size_px: int, face: Font, max_w: int) -> [text]:
-    if max_w <= 0 or length(content) == 0:
+    if max_w <= 0 or length(content) is 0:
         return [content]
     # Each word measured ONCE and the running width carried along. The
     # obvious version re-measures the whole line every time a word is added,
@@ -240,17 +240,17 @@ define wrap_one(content: text, size_px: int, face: Font, max_w: int) -> [text]:
     edit run = 0.0
     loop w in words:
         ww = text_size(w, size_px, face).wide
-        add = if line == "" then ww else space + ww
-        if run + add <= max_w or line == "":
-            line = if line == "" then w else "{line} {w}"
+        add = if line is "" then ww else space + ww
+        if run + add <= max_w or line is "":
+            line = if line is "" then w else "{line} {w}"
             run = run + add
         else:
             lines = append(lines, line)
             line = w
             run = ww
-    if line != "":
+    if line is not "":
         lines = append(lines, line)
-    if length(lines) == 0 then [content] else lines
+    if length(lines) is 0 then [content] else lines
 
 # Where a byte offset sits once the text has been broken into lines: which
 # line, and how far along it. Editing wrapped text is impossible without
@@ -276,10 +276,10 @@ public define caret_spot(content: text, size_px: int, face: Font, max_w: int, ma
         # the newline. Either way one byte goes.
         seen = seen + n + 1
         i = i + 1
-    last = if length(lines) == 0 then "" else at(lines, length(lines) - 1)
-    r = if found then row else if length(lines) == 0 then 0 else length(lines) - 1
+    last = if length(lines) is 0 then "" else lines[length(lines) - 1]
+    r = if found then row else if length(lines) is 0 then 0 else length(lines) - 1
     c = if found then col else bytes_count(bytes_of(last))
-    on_line = if length(lines) == 0 then "" else at(lines, r)
+    on_line = if length(lines) is 0 then "" else lines[r]
     b = bytes_of(on_line)
     cut = if c > bytes_count(b) then bytes_count(b) else if c < 0 then 0 else c
     Size{wide: to_real(text_size(text_of(bytes_part(b, 0, cut)), size_px, face).wide), high: to_real(r * line_high(size_px, face))}
@@ -288,7 +288,7 @@ public define caret_spot(content: text, size_px: int, face: Font, max_w: int, ma
 # click in wrapped text has to answer.
 public define caret_from(content: text, size_px: int, face: Font, max_w: int, px: int, py: int) -> int:
     lines = wrap_text(content, size_px, face, max_w)
-    if length(lines) == 0:
+    if length(lines) is 0:
         return 0
     lh = line_high(size_px, face)
     raw = if lh > 0 then py // lh else 0
@@ -299,7 +299,7 @@ public define caret_from(content: text, size_px: int, face: Font, max_w: int, px
         if i < row:
             seen = seen + bytes_count(bytes_of(l)) + 1
         i = i + 1
-    seen + caret_at(at(lines, row), size_px, face, px)
+    seen + caret_at(lines[row], size_px, face, px)
 
 # How tall that wrapped block is.
 # How tall that wrapped block is - remembered, because breaking a paragraph

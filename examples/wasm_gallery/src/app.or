@@ -1,0 +1,467 @@
+# The gallery, in a browser, with nothing between it and the page.
+#
+# The web_demo next door proves the seam: a native server lays the screen
+# out and sends JSON, a page paints it. This is the same program with the
+# server deleted. The document, the resolver, the theme and the font all
+# compile to wasm and run in the tab; the page supplies eleven painting
+# functions and a canvas, and that is the whole of the platform.
+#
+# Two things a wasm module cannot do, and how each is answered:
+#
+#   It keeps nothing between calls. Linear memory is a bump pointer the
+#   page winds back after every frame - that IS the frame region - so a
+#   value that must outlive a frame lives in the slot store, which is a Map
+#   on the host. Everything the gallery remembers is saved and loaded there,
+#   the same way the native app uses `keep`.
+#
+#   It cannot return a list. So it does not: `paint_page` calls the page
+#   once per draw command as it walks. Nothing is encoded, nothing parsed.
+#
+#   Build:  bash build.sh
+#   Serve:  any static server over this directory, then open index.html
+
+use ori_geometry
+use ori_display
+use veil_document
+use veil_theme
+use veil_resolver
+use veil_page
+use veil_gallery
+use veil_motion
+use veil_edit
+use veil_measure
+use typeface
+
+# How big the screen is, in veil's own pixels. The page owns this: a window
+# is a thing a person drags the corner of, and a UI that cannot answer that
+# is a picture of a UI. Zero means the page has not said yet.
+define view_w() -> int:
+    said = slot_get_int("g:win_w")
+    if said > 0 then said else 1040
+
+define view_h() -> int:
+    said = slot_get_int("g:win_h")
+    if said > 0 then said else 720
+
+define box() -> Rect:
+    Rect{x: 0.0, y: 0.0, wide: to_real(view_w()), high: to_real(view_h())}
+
+# The page says how much room there is. Nothing else has to happen: the
+# document is built from the size every frame, so the next one is the new
+# shape.
+public define room_is(w: int, h: int) -> int:
+    slot_set("g:win_w", if w < 320 then 320 else w)
+    slot_set("g:win_h", if h < 240 then 240 else h)
+    1
+
+# When the page was opened. Everything that moves is told from it.
+define since() -> int:
+    slot_get_int("g:began")
+
+# --- the state that outlives a call -----------------------------------------
+# Fifty-six fields, written out. There is no reflection in Orion and no way
+# to put a struct in a slot that survives the frame region, so this is what
+# "state" costs on this backend: two functions, mechanical, and free at
+# fifty-six slot writes a frame.
+
+define save(g: Gallery) -> int:
+    slot_set("g:hover", g.hover)
+    slot_set("g:focus", g.focus)
+    slot_set("g:show_focus", if g.show_focus then 1 else 0)
+    slot_set("g:tab", g.tab)
+    slot_set("g:scroll", g.scroll)
+    slot_set("g:chosen", g.chosen)
+    slot_set("g:before", g.before)
+    slot_set("g:picked", g.picked)
+    slot_set("g:after", g.after)
+    slot_set("g:typing", if g.typing then 1 else 0)
+    slot_set("g:note", g.note)
+    slot_set("g:note_at", g.note_at)
+    slot_set("g:note_to", g.note_to)
+    slot_set("g:noting", if g.noting then 1 else 0)
+    slot_set("g:dialog", if g.dialog then 1 else 0)
+    slot_set("g:menu", g.menu)
+    slot_set("g:menu_x", g.menu_x)
+    slot_set("g:menu_y", g.menu_y)
+    slot_set("g:picked_item", g.picked_item)
+    slot_set("g:lit", if g.lit then 1 else 0)
+    slot_set("g:slider", g.slider)
+    slot_set("g:volume", g.volume)
+    slot_set("g:sfx", g.sfx)
+    slot_set("g:vsync", if g.vsync then 1 else 0)
+    slot_set("g:subs", if g.subs then 1 else 0)
+    slot_set("g:quality", g.quality)
+    slot_set("g:steps", g.steps)
+    slot_set("g:screen", g.screen)
+    slot_set("g:card", g.card)
+    slot_set("g:slot", g.slot)
+    slot_set("g:bind", g.bind)
+    slot_set("g:key_fwd", g.key_fwd)
+    slot_set("g:key_jump", g.key_jump)
+    slot_set("g:open", g.open)
+    slot_set("g:drawer", if g.drawer then 1 else 0)
+    slot_set("g:notes", g.notes)
+    slot_set("g:boxes", if g.boxes then 1 else 0)
+    slot_set("g:tip", g.tip)
+    slot_set("g:contrast", if g.contrast then 1 else 0)
+    slot_set("g:bright", if g.bright then 1 else 0)
+    slot_set("g:zoom", g.zoom)
+    slot_set("g:dock_w", g.dock_w)
+    slot_set("g:dock_h", g.dock_h)
+    slot_set("g:dock_plan", g.dock_plan)
+    slot_set("g:dock_pick", g.dock_pick)
+    slot_set("g:dock_ws", g.dock_ws)
+    slot_set("g:carrying", g.carrying)
+    slot_set("g:carry_x", g.carry_x)
+    slot_set("g:carry_y", g.carry_y)
+    slot_set("g:over", g.over)
+    slot_set("g:grabbed", g.grabbed)
+    slot_set("g:moved", g.moved)
+    slot_set("g:sort_by", g.sort_by)
+    slot_set("g:sort_up", if g.sort_up then 1 else 0)
+    slot_set("g:table_at", g.table_at)
+    slot_set("g:page", g.page)
+    1
+
+define held_gallery() -> Gallery:
+    Gallery{win_w: view_w(), win_h: view_h(), seconds: to_real(monotonic_ms() - since()) / 1000.0, hover: slot_get("g:hover"), focus: slot_get("g:focus"), show_focus: slot_get_int("g:show_focus") is 1, tab: slot_get("g:tab"), scroll: slot_get_int("g:scroll"), chosen: slot_get_int("g:chosen"), before: slot_get("g:before"), picked: slot_get("g:picked"), after: slot_get("g:after"), typing: slot_get_int("g:typing") is 1, note: slot_get("g:note"), note_at: slot_get_int("g:note_at"), note_to: slot_get_int("g:note_to"), noting: slot_get_int("g:noting") is 1, dialog: slot_get_int("g:dialog") is 1, menu: slot_get("g:menu"), menu_x: slot_get_int("g:menu_x"), menu_y: slot_get_int("g:menu_y"), picked_item: slot_get("g:picked_item"), lit: slot_get_int("g:lit") is 1, slider: slot_get_int("g:slider"), volume: slot_get_int("g:volume"), sfx: slot_get_int("g:sfx"), vsync: slot_get_int("g:vsync") is 1, subs: slot_get_int("g:subs") is 1, quality: slot_get("g:quality"), steps: slot_get_int("g:steps"), screen: slot_get("g:screen"), card: slot_get_int("g:card"), slot: slot_get_int("g:slot"), bind: slot_get("g:bind"), key_fwd: slot_get("g:key_fwd"), key_jump: slot_get("g:key_jump"), open: slot_get("g:open"), drawer: slot_get_int("g:drawer") is 1, notes: slot_get("g:notes"), boxes: slot_get_int("g:boxes") is 1, tip: slot_get("g:tip"), contrast: slot_get_int("g:contrast") is 1, bright: slot_get_int("g:bright") is 1, zoom: slot_get_int("g:zoom"), dock_w: slot_get_int("g:dock_w"), dock_h: slot_get_int("g:dock_h"), dock_plan: slot_get("g:dock_plan"), dock_pick: slot_get("g:dock_pick"), dock_ws: slot_get("g:dock_ws"), carrying: slot_get("g:carrying"), carry_x: slot_get_int("g:carry_x"), carry_y: slot_get_int("g:carry_y"), over: slot_get("g:over"), grabbed: slot_get("g:grabbed"), moved: slot_get("g:moved"), sort_by: slot_get("g:sort_by"), sort_up: slot_get_int("g:sort_up") is 1, table_at: slot_get_int("g:table_at"), page: slot_get_int("g:page")}
+
+# What the pointer has hold of, and where it took hold. A drag is a name
+# plus how far the pointer has come since.
+define has_hold() -> text = slot_get("g:held")
+
+define line_now() -> Edit:
+    Edit{content: slot_get("g:line"), caret: slot_get_int("g:caret"), anchor: slot_get_int("g:anchor")}
+
+define save_line(e: Edit) -> int:
+    slot_set("g:line", e.content)
+    slot_set("g:caret", e.caret)
+    slot_set("g:anchor", e.anchor)
+    1
+
+# What is in the field, and where the caret and the mark sit in it.
+define typed_into(g: Gallery, e: Edit) -> Gallery:
+    save_line(e)
+    slot_set("g:before", edit_left_of(e))
+    slot_set("g:picked", edit_selected(e))
+    slot_set("g:after", edit_right_of(e))
+    held_gallery()
+
+define after_at(whole: text, from: int) -> text:
+    b = bytes_of(whole)
+    n = bytes_count(b)
+    cut = if from > n then n else from
+    text_of(bytes_part(b, cut, n))
+
+# One step round the reading order, which veil works out from where things
+# ended up - so a control added today is walked today, and nobody keeps a
+# list in step with the screen.
+define step_focus(names: [text], now: text, by: int) -> text:
+    n = length(names)
+    edit here = 0 - 1
+    edit i = 0
+    loop nm in names:
+        if nm is now:
+            here = i
+        i = i + 1
+    if n is 0 then "" else names[(here + by + n * 2) % n]
+
+# Moving the ring, and saying so. The ring only shows for a key: a press
+# with the pointer needs no ring, your hand is on the thing.
+define ring_on(name: text) -> int:
+    slot_set("g:focus", name)
+    slot_set("g:show_focus", 1)
+    slot_set("g:typing", if name is "field" then 1 else 0)
+    1
+
+define starts_with(t: text, head: text) -> truth:
+    b = bytes_of(t)
+    h = bytes_of(head)
+    if bytes_count(h) > bytes_count(b):
+        return false
+    text_of(bytes_part(b, 0, bytes_count(h))) is head
+
+# --- the clipboard ----------------------------------------------------------
+# A clipboard is a PLATFORM, not a text field, so it crosses the seam like
+# everything else: the page asks what is selected, and hands back what was
+# put there. Text goes both ways as a pointer into linear memory.
+
+public define picked_text() -> text:
+    edit_selected(line_now())
+
+public define cut_out() -> int:
+    g = held_gallery()
+    if g.typing:
+        gone = typed_into(g, edit_drop(line_now()))
+    1
+
+public define paste_in(t: text) -> int:
+    g = held_gallery()
+    if g.typing:
+        fuller = typed_into(g, edit_paste(line_now(), t))
+    1
+
+# --- the two entry points ---------------------------------------------------
+
+# Called once, before the first frame.
+public define boot() -> int:
+    slot_set("g:began", monotonic_ms())
+    save(Gallery{win_w: view_w(), win_h: view_h(), seconds: 0.0, hover: "", focus: "", show_focus: false, tab: "kontroller", scroll: 0, chosen: 0, before: "Skriv något långt här", picked: "", after: "", typing: false, dialog: false, lit: false, menu: "", menu_x: 0, menu_y: 0, picked_item: "", open: "", drawer: false, zoom: 100, page: 0, dock_w: 260, dock_h: 120, dock_plan: "Utforskare|Sök/Konsol|Problem", dock_pick: "Utforskare|Konsol", dock_ws: "260", carrying: "", carry_x: 0, carry_y: 0, over: "", grabbed: "", moved: "", sort_by: "namn", sort_up: true, table_at: 0, contrast: false, bright: false, tip: "", notes: "", boxes: false, note: "Flera rader.", note_at: 0, note_to: 0, noting: false, slider: 35, volume: 70, sfx: 45, vsync: true, subs: false, quality: "Mellan", steps: 1, screen: "1920 x 1080", card: 0, slot: 0, bind: "", key_fwd: "W", key_jump: "Space"})
+    save_line(edit_new("Skriv något långt här"))
+    1
+
+# One frame. `what` says what happened since the last one:
+#   0 nothing, 1 move, 2 press, 3 release, 4 drag, 5 wheel, 6 a letter, 7 a key
+# The answer is how many draw commands went out.
+# Whether this screen has anything moving in it.
+#
+# The cheapest frame is the one nobody builds. A page with nothing moving on
+# it, with nobody touching it, is the same picture it was a moment ago, and
+# building it again to find that out costs a millisecond and a half. So the
+# page asks first.
+#
+# This is what a framework can and cannot know. Veil says whether something
+# it is EASING is still on its way; the app says whether it draws anything
+# from the clock. Neither can answer for the other.
+public define restless() -> truth:
+    g = held_gallery()
+    motion_busy() or g.typing or g.noting or tab_moves(g.tab)
+
+# --- one frame -------------------------------------------------------------
+# What an event DOES is written once. A cold frame and a frame told from the
+# one before differ in exactly one line - which of `first_frame` and
+# `next_frame` built the screen the event is picked against - and everything
+# after that is shared, so the two cannot drift.
+
+define handled(g_in: Gallery, doc: SemanticDocument, dress: Theme, face: Font, here: Frame, what: int, x: int, y: int, code: int, mods: int) -> truth:
+    edit g = g_in
+    # The wheel scrolls whatever is UNDER the pointer: the table if it is
+    # over the table, the long list if it is over a row, the page otherwise.
+    # `y` is how many pixels the wheel actually turned, not a notch count -
+    # a trackpad sends a dozen small ones where a mouse sends one big one,
+    # and treating them alike is what made scrolling jump.
+    if what is 5:
+        if starts_with(g.hover, "trow") or g.hover is "table":
+            step_t = g.table_at + y
+            slot_set("g:table_at", if step_t < 0 then 0 else step_t)
+        else if starts_with(g.hover, "row"):
+            slot_set("g:scroll", g.scroll + y)
+        else:
+            step = g.page + y
+            slot_set("g:page", if step < 0 then 0 else step)
+    if what is 1:
+        slot_set("g:hover", pick_placed(doc, dress, here.placed, x, y))
+    if what is 3:
+        slot_set("g:held", "")
+    if what is 2:
+        on = pick_placed(doc, dress, here.placed, x, y)
+        # The SAME press chain the native app runs. Hover is written AFTER
+        # the save, because the save writes back the hover the frame was
+        # loaded with - which is the one the press just replaced.
+        g = pressed(g, on)
+        save(g)
+        slot_set("g:hover", on)
+        # A slider and a grip are things you take HOLD of.
+        if on is "slider" or on is "vol" or on is "sfx" or starts_with(on, "grip:") or starts_with(on, "dock:"):
+            slot_set("g:held", on)
+            slot_set("g:grab_x", x)
+            slot_set("g:grab_y", y)
+            slot_set("g:grab_w", if on is "grip:y" then g.dock_h else width_of(g, number_in(after_at(on, 7)), false))
+        # A finger landing on nothing that answers takes hold of the PAGE.
+        # That is what scrolling is on a touch screen, and it is the only
+        # place the pointer type matters: a mouse dragging empty space is
+        # not asking for anything.
+        if mods is 1 and (on is "" or on is "page" or on is "\{mute\}"):
+            slot_set("g:held", "page")
+            slot_set("g:grab_y", y)
+            slot_set("g:grab_page", g.page)
+        if on is "field":
+            save_line(edit_put(line_now(), caret_at(line_now().content, 14, face, x - to_whole(rect_of(doc, here.placed, "field").x) - 12)))
+    # The pointer moved with the button still down. What that MEANS is the
+    # orb's business; where it is, is ours.
+    # A carried tab follows the pointer, and the landing under it is what a
+    # release would mean. Both are the orb's; where the pointer is, is ours.
+    if (what is 4 or what is 3) and g.carrying is not "":
+        landing = pick_placed(doc, dress, here.placed, x, y)
+        g = carried_to(g, x, y, landing)
+        save(if what is 3 then dropped(g, landing) else g)
+    if what is 4 and has_hold() is "page":
+        towed = slot_get_int("g:grab_page") + (slot_get_int("g:grab_y") - y)
+        slot_set("g:page", if towed < 0 then 0 else towed)
+    else if what is 4 and has_hold() is not "":
+        save(dragged(g, has_hold(), share_at(rect_of(doc, here.placed, has_hold()), x), x - slot_get_int("g:grab_x"), y - slot_get_int("g:grab_y"), slot_get_int("g:grab_w")))
+    # A key belongs to whatever is being typed into.
+    # A letter goes into whatever is being typed into. A space when nothing
+    # is presses whatever the ring is on, the way a space does everywhere.
+    if what is 6 and g.typing:
+        g = typed_into(g, edit_type(line_now(), code))
+    if what is 6 and not g.typing and code is 32:
+        save(pressed(g, g.focus))
+        put_ring = ring_on(g.focus)
+    # A key. Tab and Escape are the screen's whatever is happening; the rest
+    # belongs to the field while it is being typed into, and walks the screen
+    # when it is not.
+    if what is 7:
+        if code is 9:
+            walked = step_focus(reading_order(doc, here.placed), g.focus, if mods is 1 or mods is 3 then 0 - 1 else 1)
+            put_tab = ring_on(walked)
+        else if code is 27:
+            slot_set("g:dialog", 0)
+            slot_set("g:typing", 0)
+            slot_set("g:menu", "")
+        else if g.typing:
+            g = typed_into(g, edit_key(line_now(), code, mods is 2 or mods is 3, mods is 1 or mods is 3, false))
+        else if code is 13:
+            save(pressed(g, g.focus))
+            put_enter = ring_on(g.focus)
+        # The arrows move the ring the way they point, out of the rects the
+        # layout already worked out. Nobody keeps a list of what is beside
+        # what, so a screen that grew a control yesterday is walked today.
+        else if code is 37 or code is 38 or code is 39 or code is 40:
+            ax = if code is 37 then 0 - 1 else if code is 39 then 1 else 0
+            ay = if code is 38 then 0 - 1 else if code is 40 then 1 else 0
+            leant = near_toward(doc, here.placed, g.focus, ax, ay)
+            if leant is not "":
+                put_arrow = ring_on(leant)
+
+    # The screen `here` was built from the state as it stood BEFORE the
+    # event. If the event changed nothing - and a pointer move over the same
+    # thing changes nothing at all - that screen is already the answer, and
+    # building a second one would be two milliseconds thrown away.
+    if what is 1 then slot_get("g:hover") is not g.hover else what is not 0
+
+public define frame(what: int, x: int, y: int, code: int, mods: int) -> int:
+    face = font_body()
+    dress = gallery_theme()
+    # Which palette this frame started in. Building the theme is the second
+    # most expensive thing a frame does after the layout, and it only ever
+    # changes when someone presses the two buttons that change it - so the
+    # frame asks whether they did, instead of building it twice.
+    was_lit = slot_get_int("veil:bright") * 2 + slot_get_int("veil:contrast")
+    g = held_gallery()
+    doc = gallery_doc(g)
+    here = first_frame(doc, dress, face, box())
+    moved_on = handled(g, doc, dress, face, here, what, x, y, code, mods)
+    now_lit = slot_get_int("veil:bright") * 2 + slot_get_int("veil:contrast")
+    wearing = if now_lit is was_lit then dress else gallery_theme()
+    told = if moved_on then first_frame(gallery_doc(held_gallery()), wearing, face, box()) else here
+    paint_page(told.list)
+
+# The same frame, told from the one before. A struct crosses an export as a
+# pointer, so the page holds the last one as a plain number and hands it
+# back - and it keeps TWO arenas, winding back the one this frame is not
+# reading, so what `before` points at is still there.
+# --- why a frame told from the one before does not pay ----------------------
+#
+# It was built, twice, and measured both times. Writing down what it costs
+# so nobody builds it a third time.
+#
+# HOLDING one is not the problem, and neither is the memory. A struct crosses
+# an export as a POINTER, so the page can keep the last frame as a plain
+# number and hand it back. And `orion_persist_on` is a host import here, so
+# the page can make it mean something: park the frame pointer, allocate from
+# a second region it does not wind back. That works - it wants counting
+# rather than toggling, because `font_body` opens a kept scope inside one
+# that is already open.
+#
+# The chain is not the problem either. A told frame copies commands that
+# point at words the frame before allocated, so the chain of frames it needs
+# is unbounded and no fixed number of arenas is sound - but the chain can be
+# CUT: let the kept region only grow, empty it when it is nearly full, and
+# take one cold frame, which is the one frame that needs no chain.
+#
+# All of that was built and it ran: three hundred and twenty nine told frames
+# against a hundred and eleven cold ones, thirty three kilobytes a frame
+# instead of five hundred and thirty six.
+#
+# And it was worth NOTHING. 1.3 ms with it, 1.3 ms without.
+#
+# The reason is in `next_frame` itself: it always RE-PLACES, and only the
+# painting is reused. Painting is two fifths of a frame, and comparing a
+# hundred and sixty one nodes against the ones before them to find out what
+# may be reused costs most of that back.
+#
+# So the thing worth building is not a told frame. It is a layout that skips
+# a subtree whose inputs did not change - `steady_below` already does exactly
+# that for painting, and nothing does it for measuring or placing. THAT is
+# where the two fifths that are left actually are.
+
+# --- what an incremental frame would be worth ------------------------------
+# A frame told from the one before is the whole point of `next_frame`, and
+# wasm cannot hold one between calls. Before building a way to, these two
+# answer what it would buy: the same work cold, and the same work told.
+public define bench_cold() -> int:
+    face = font_body()
+    dress = gallery_theme()
+    g = held_gallery()
+    a = first_frame(gallery_doc(g), dress, face, box())
+    length(a.list.commands)
+
+public define bench_told() -> int:
+    face = font_body()
+    dress = gallery_theme()
+    g = held_gallery()
+    a = first_frame(gallery_doc(g), dress, face, box())
+    b = next_frame(a, gallery_doc(g), dress, face, box())
+    length(b.list.commands)
+
+# What one crossing of the seam costs, measured where it happens rather
+# than guessed at from the outside. A frame makes about this many.
+public define bench_slots(times: int) -> int:
+    edit hits = 0
+    loop i in 0 until times:
+        k = "bench:{i % 64}"
+        hits = hits + slot_get_int(k)
+    hits
+
+# The same loop WITHOUT the crossing, so the difference is the crossing and
+# not the loop, the interpolation or the addition.
+public define bench_noslots(times: int) -> int:
+    edit hits = 0
+    loop i in 0 until times:
+        k = "bench:{i % 64}"
+        hits = hits + bytes_count(bytes_of(k))
+    hits
+
+# How many boxes the screen being shown is made of, so a millisecond can be
+# read per node instead of per screen. A gallery page is a stress test; a
+# HUD is thirty boxes.
+public define bench_nodes() -> int:
+    length(gallery_doc(held_gallery()).nodes)
+
+# The two halves of a layout, apart, so a microsecond per node can be put
+# where it actually goes.
+public define bench_measure() -> int:
+    length(measure_all(gallery_doc(held_gallery()), gallery_theme(), font_body()).box)
+
+public define bench_place() -> int:
+    doc = gallery_doc(held_gallery())
+    dress = gallery_theme()
+    face = font_body()
+    sizes = measure_all(doc, dress, face)
+    length(place_all(doc, dress, face, sizes, box()))
+
+# What a bare crossing costs: a host call that takes nothing, does nothing
+# and answers a number. Everything else at this seam is this plus work.
+public define bench_call() -> int:
+    edit n = 0
+    loop i in 0 until 3851:
+        n = n + monotonic_ms()
+    n
+
+# The same loop with no crossing at all, so the difference is the crossing.
+public define bench_nocall() -> int:
+    edit n = 0
+    loop i in 0 until 3851:
+        n = n + i
+    n
+
+# What one style lookup costs. The paint pass still does its own, once or
+# twice a node, though the measure pass already worked every one of them out.
+public define bench_style() -> int:
+    doc = gallery_doc(held_gallery())
+    dress = gallery_theme()
+    edit n = 0
+    loop i in 0 until length(doc.nodes):
+        n = n + style_of(dress, doc.nodes[i]).radius
+    n

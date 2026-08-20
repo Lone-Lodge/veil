@@ -38,22 +38,22 @@ public define lookup_state(theme: Theme, role: Role, state: text) -> StyleRule:
     # them - a string interpolation per node, in both the measure pass and
     # the placement pass - was a real slice of every frame. Ask for the
     # plain rule without ever composing a name.
-    if state == "":
+    if state is "":
         return plain_rule(theme, role.name)
     want = "{role.name}:{state}"
     edit found = nothing_rule(role.name)
     edit exact = false
     loop rule in theme.rules:
-        if rule.role_name == role.name and not exact:
+        if rule.role_name is role.name and not exact:
             found = rule
-        if rule.role_name == want:
+        if rule.role_name is want:
             found = rule
             exact = true
     found
 
 define plain_rule(theme: Theme, name: text) -> StyleRule:
     loop rule in theme.rules:
-        if rule.role_name == name:
+        if rule.role_name is name:
             return rule
     nothing_rule(name)
 

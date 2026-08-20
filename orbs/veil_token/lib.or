@@ -23,25 +23,25 @@ public type TokenRef: name: text, literal: text
 
 define tk_starts_hash(v: text) -> truth:
     b = bytes_of(v)
-    if bytes_count(b) == 0 then false else byte_at(b, 0) == 35
+    if bytes_count(b) is 0 then false else byte_at(b, 0) is 35
 
 define tk_name_eq(a: text, b: text) -> truth:
     ba = bytes_of(a)
     bb = bytes_of(b)
     na = bytes_count(ba)
-    if na != bytes_count(bb):
+    if na is not bytes_count(bb):
         false
     else:
         edit eq = true
-        loop i in 0..<na:
-            if byte_at(ba, i) != byte_at(bb, i):
+        loop i in 0 until na:
+            if byte_at(ba, i) is not byte_at(bb, i):
                 eq = false
         eq
 
 define tk_lookup(tokens: [TokenRef], name: text) -> text:
     edit out = ""
-    loop i in 0..<length(tokens):
-        t = at(tokens, i)
+    loop i in 0 until length(tokens):
+        t = tokens[i]
         if tk_name_eq(t.name, name):
             out = t.literal
     out
@@ -60,7 +60,7 @@ public define resolve_token(tokens: [TokenRef], value: text) -> text:
             if done or steps >= 16:
                 break
             hit = tk_lookup(tokens, cur)
-            if length(hit) == 0:
+            if length(hit) is 0:
                 done = true
             else:
                 cur = hit

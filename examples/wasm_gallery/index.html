@@ -1,0 +1,553 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Veil — hela galleriet som wasm</title>
+<style>
+  /* Nothing in this page lays anything out. Every box, every line of text
+     and every rounded corner inside the canvas was decided by veil, in
+     wasm, in this tab - there is no server and no DOM below it. */
+  html, body { margin: 0; height: 100%; background: #0b0b0b; color: #8a8a8a;
+               font: 12px "VeilBody", system-ui, sans-serif; }
+  body { display: flex; flex-direction: column; gap: 6px; padding: 10px; box-sizing: border-box; }
+  /* The canvas takes whatever room is left. Veil lays out to that, every
+     frame, so dragging the window is not a special case of anything. */
+  canvas { border-radius: 8px; cursor: default; touch-action: none; flex: 1 1 auto; width: 100%; min-height: 0; display: block; }
+  #status { min-height: 1.2em; }
+  b { color: #e0b04a; font-weight: normal; }
+</style>
+</head>
+<body>
+<div id="status">laddar…</div>
+<canvas id="cv"></canvas>
+<script>
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const statusEl = document.getElementById('status');
+
+// The screen veil lays out for, in its own pixels - which is whatever room
+// the window gives the canvas, not a number written down here.
+//
+// The canvas holds MORE dots than that on a display that packs more into
+// the same inch: at 150 % a 1040-wide canvas stretched to 1560 is a blurred
+// photograph of the UI. The backing store is sized in device dots and the
+// whole painting scaled by the same factor, so text is drawn at the size it
+// is shown at.
+let W = 1040, H = 720, dots = 1;
+function fit() {
+  const r = cv.getBoundingClientRect();
+  W = Math.max(320, Math.round(r.width));
+  H = Math.max(240, Math.round(r.height));
+  dots = window.devicePixelRatio || 1;
+  cv.width = Math.round(W * dots);
+  cv.height = Math.round(H * dots);
+  wearing = '';                       // a resized canvas forgets its state
+  where = r;
+  if (mod) mod.room_is(W, H);
+}
+
+const ICONS = {
+  folder: '\u{1F4C1}', file: '\u{1F4C4}', search: '\u{1F50D}', settings: '⚙',
+  bell: '\u{1F514}', user: '\u{1F464}', lock: '\u{1F512}', copy: '❐',
+  trash: '\u{1F5D1}', menu: '≡', close: '✕', x: '✕',
+  check: '✔', plus: '＋', minus: '−', play: '▶', pause: '⏸',
+  star: '★', heart: '♥', diamond: '◆', circle: '●', triangle: '▲',
+  chevron: '›', chevron_right: '›', chevron_left: '‹',
+  chevron_down: 'ˇ', chevron_up: 'ˆ',
+  arrow_right: '→', arrow_left: '←', arrow_up: '↑', arrow_down: '↓',
+  sword: '\u{1F5E1}', shield: '\u{1F6E1}', bow: '\u{1F3F9}', potion: '\u{1F9EA}',
+  ring: '\u{1F48D}', orb: '\u{1F52E}', scroll: '\u{1F4DC}', key: '\u{1F5DD}',
+  pickaxe: '⛏', meat: '\u{1F356}', gem: '\u{1F48E}', coin: '\u{1FA99}',
+};
+
+// An empty colour means "do not paint", never "paint black".
+function ink(c) { return (c && c.length > 1) ? c : null; }
+
+// A radius crosses as a string so one command can carry four corners:
+// "8" is all four, "8 0 8 0" goes top-left, top-right, bottom-right,
+// bottom-left. Held to half the shorter side, the way the shader holds it.
+function corners(r, w, h) {
+  const parts = String(r == null ? 0 : r).trim().split(/\s+/).map(Number);
+  const four = parts.length >= 4 ? parts.slice(0, 4)
+             : parts.length === 2 ? [parts[0], parts[1], parts[0], parts[1]]
+             : [parts[0] || 0, parts[0] || 0, parts[0] || 0, parts[0] || 0];
+  const cap = Math.min(w, h) / 2;
+  return four.map(v => Math.max(0, Math.min(cap, v || 0)));
+}
+
+function roundPath(x, y, w, h, rad) {
+  const [tl, tr, br, bl] = corners(rad, w, h);
+  ctx.beginPath();
+  ctx.moveTo(x + tl, y);
+  ctx.lineTo(x + w - tr, y);
+  ctx.arcTo(x + w, y, x + w, y + tr, tr);
+  ctx.lineTo(x + w, y + h - br);
+  ctx.arcTo(x + w, y + h, x + w - br, y + h, br);
+  ctx.lineTo(x + bl, y + h);
+  ctx.arcTo(x, y + h, x, y + h - bl, bl);
+  ctx.lineTo(x, y + tl);
+  ctx.arcTo(x, y, x + tl, y, tl);
+  ctx.closePath();
+}
+
+// Clipping is a SETTING, not a stack. The resolver has already worked out
+// what is inside every clip a node sits under, so each command says the
+// finished box. A box with no area is how it says there is no clip.
+let clipped = false;
+function setClip(x, y, w, h, rad) {
+  if (clipped) { ctx.restore(); clipped = false; }
+  if (w < 0 || h < 0) return;
+  ctx.save();
+  roundPath(x, y, w, h, rad);
+  ctx.clip();
+  clipped = true;
+}
+
+// Pictures arrive as names. Loaded once, kept, and the frame asked for
+// again when one lands - a missing picture is a hole, never a stall.
+const pictures = new Map();
+function pictureOf(name) {
+  if (!name) return null;
+  if (pictures.has(name)) return pictures.get(name) || null;
+  const img = new Image();
+  img.onload = () => { pictures.set(name, img); };
+  img.onerror = () => pictures.set(name, null);
+  img.src = 'art/' + encodeURIComponent(name);
+  pictures.set(name, null);
+  return null;
+}
+
+// Assigning ctx.font re-parses the shorthand and re-resolves the face, and a
+// screen has a hundred and fifty lines of text on it. Setting it only when it
+// actually changes took a frame from six milliseconds to two.
+let wearing = '';
+function face(f) { if (f !== wearing) { ctx.font = f; wearing = f; } }
+
+// --- the module -----------------------------------------------------------
+// Everything wasm cannot do for itself. The slot store is a Map here and
+// the clock is here, which is the whole of the "state" group - and it is
+// what lets a framework whose caches, motion store and "how long has this
+// been hovered" all live in slots run inside a tab.
+
+let M = null, mod = null, floor = 0;
+const began = performance.now();
+
+// --- the slot store -------------------------------------------------------
+// A byte-keyed table, and the reason it is not simply a Map of strings.
+//
+// A frame asks the store about two and a half thousand times. Measured, the
+// call across the seam is FREE - what cost 0.25 microseconds a time was
+// turning the key's bytes into a JS string so a Map could hash it. Eighty
+// four per cent of the whole thing, for a string nobody ever reads.
+//
+// So the bytes are hashed where they lie and compared where they lie. A
+// lookup allocates nothing. Text VALUES are kept as bytes too, so setting
+// one and reading it back never makes a string either. 0.25 -> 0.04 µs.
+const slots = (() => {
+  let U = null, seen = null;
+  const bytes = () => { if (seen !== M.buffer) { seen = M.buffer; U = new Uint8Array(M.buffer); } return U; };
+  // hash -> entry, or an array of them when two keys land on one hash.
+  const table = new Map();
+
+  // The module hands over the key's HASH - it works it out in a dozen wasm
+  // instructions over the bytes where they already lie - and leaves the
+  // key's address at mem[8] for the one thing a hash cannot do: tell two
+  // keys apart that landed on the same number.
+  const keyAt = (u) => u[8] | (u[9] << 8) | (u[10] << 16) | (u[11] << 24);
+  const same = (u, at, n, k) => {
+    if (k.length !== n) return false;
+    for (let i = 0; i < n; i++) if (k[i] !== u[at + i]) return false;
+    return true;
+  };
+  const find = (h) => {
+    const hit = table.get(h >>> 0);
+    if (hit === undefined) return undefined;
+    const u = bytes(), p = keyAt(u);
+    const n = u[p] | (u[p+1] << 8) | (u[p+2] << 16) | (u[p+3] << 24);
+    if (!Array.isArray(hit)) return same(u, p + 4, n, hit.k) ? hit : undefined;
+    for (const e of hit) if (same(u, p + 4, n, e.k)) return e;
+    return undefined;
+  };
+  const put = (h, v) => {
+    const u = bytes(), p = keyAt(u);
+    const n = u[p] | (u[p+1] << 8) | (u[p+2] << 16) | (u[p+3] << 24);
+    h = h >>> 0;
+    const hit = table.get(h);
+    if (hit === undefined) { table.set(h, { k: u.slice(p + 4, p + 4 + n), v: v }); return; }
+    if (!Array.isArray(hit)) {
+      if (same(u, p + 4, n, hit.k)) { hit.v = v; return; }
+      table.set(h, [hit, { k: u.slice(p + 4, p + 4 + n), v: v }]);
+      return;
+    }
+    for (const e of hit) if (same(u, p + 4, n, e.k)) { e.v = v; return; }
+    hit.push({ k: u.slice(p + 4, p + 4 + n), v: v });
+  };
+  // A text value, copied out of wasm memory as bytes. No string is made.
+  const grab = (p) => {
+    const u = bytes();
+    const n = u[p] | (u[p+1] << 8) | (u[p+2] << 16) | (u[p+3] << 24);
+    return u.slice(p + 4, p + 4 + n);
+  };
+  return {
+    find: find, put: put, grab: grab,
+    get size() { let n = 0; for (const v of table.values()) n += Array.isArray(v) ? v.length : 1; return n; },
+    // For looking at the store from outside - a test, a status line. Never
+    // on the path a frame takes.
+    look: (name) => {
+      for (const v of table.values())
+        for (const e of (Array.isArray(v) ? v : [v]))
+          if (utf8.decode(e.k) === name) return (e.v instanceof Uint8Array) ? utf8.decode(e.v) : e.v;
+      return undefined;
+    },
+  };
+})();
+
+// One decoder, not one per string. A frame crosses this seam a couple of
+// thousand times - every slot key, every colour, every line of text - and
+// building a fresh TextDecoder each time was over half the frame.
+const utf8 = new TextDecoder(), toUtf8 = new TextEncoder();
+const readText = (p) => {
+  const u = new Uint8Array(M.buffer);
+  const n = u[p] | (u[p+1] << 8) | (u[p+2] << 16) | (u[p+3] << 24);
+  return utf8.decode(u.subarray(p + 4, p + 4 + n));
+};
+// Text lives in linear memory behind a four-byte length, taken from the
+// bump pointer the module keeps at address 0.
+const EMPTY = new Uint8Array(0);
+const allocBytes = (b) => {
+  const dv = new DataView(M.buffer), u8 = new Uint8Array(M.buffer);
+  const p = dv.getUint32(0, true);
+  dv.setUint32(p, b.length, true);
+  u8.set(b, p + 4);
+  dv.setUint32(0, p + 4 + b.length, true);
+  return p;
+};
+const allocText = (s) => allocBytes(toUtf8.encode(s));
+
+const env = {
+  __print: (p, nl) => console.log(readText(p)),
+  __argc: () => 1,
+  __argv: (i) => allocText(i === 0 ? 'veil' : ''),
+  __file_write: () => 1,
+  __file_read: () => allocText(''),
+  host_sin: Math.sin, host_cos: Math.cos, host_tan: Math.tan,
+  host_sqrt: Math.sqrt, host_exp: Math.exp, host_log: Math.log,
+  host_pow: Math.pow, host_atan2: Math.atan2,
+  __slot_set: (k, v) => { slots.put(k, v); return 0; },
+  __slot_set_text: (k, v) => { slots.put(k, slots.grab(v)); return 0; },
+  __slot_get_int: (k) => { const e = slots.find(k); return (e !== undefined && typeof e.v === 'number') ? e.v : 0; },
+  __slot_get: (k) => { const e = slots.find(k); return allocBytes((e !== undefined && e.v instanceof Uint8Array) ? e.v : EMPTY); },
+  __slot_has: (k) => (slots.find(k) !== undefined ? 1 : 0),
+  __now: () => Math.round(performance.now() - began),
+  fmt_float: (x, places) => allocText(Number(x).toFixed(places >>> 0)),
+  // There is no arena and no persist region in a page: one linear memory,
+  // a bump pointer, and a host that winds it back between frames.
+  orion_persist_on: () => 0, orion_persist_off: () => 0,
+  orion_arena_off: () => 0, orion_arena_on: () => 0, orion_arena_active: () => 0,
+
+  // --- the painter: eleven commands, called as the list is walked ---------
+  // Nothing is serialised and nothing is parsed. A rectangle crosses as
+  // four numbers.
+  page_rect: (x, y, w, h, colP, radP) => {
+    const col = ink(readText(colP));
+    if (!col) return 0;
+    ctx.fillStyle = col;
+    // A fill that changes down its own box is a fill, not a second kind of
+    // command, so a gradient rides in the colour slot.
+    if (col.startsWith('grad:')) {
+      const bits = col.split(':');
+      const g = ctx.createLinearGradient(x, y, x, y + h);
+      g.addColorStop(0, '#' + bits[1]); g.addColorStop(1, '#' + bits[2]);
+      ctx.fillStyle = g;
+    }
+    roundPath(x, y, w, h, readText(radP));
+    ctx.fill();
+    return 1;
+  },
+  // The same rounded box, blurred, with nothing on top - the box that casts
+  // it comes next in the stream.
+  page_shadow: (x, y, w, h, colP, rad, blur) => {
+    const col = ink(readText(colP));
+    if (!col) return 0;
+    ctx.save();
+    ctx.shadowColor = col; ctx.shadowBlur = blur || 0; ctx.fillStyle = col;
+    roundPath(x, y, w, h, rad);
+    ctx.fill();
+    ctx.restore();
+    return 1;
+  },
+  page_clip: (x, y, w, h, rad) => { setClip(x, y, w, h, rad); return 1; },
+  page_text: (x, y, sP, colP, size) => {
+    const col = ink(readText(colP));
+    if (!col) return 0;
+    ctx.fillStyle = col;
+    face((size || 13) + 'px VeilBody, system-ui, sans-serif');
+    ctx.fillText(readText(sP), x, y);
+    return 1;
+  },
+  // An icon with no colour is not painted, exactly like text with none.
+  // Guessing a grey here hid a theme that never said what colour its mark
+  // was, and drew a light grey tick on a blue box.
+  //
+  // A symbol font comes FIRST in the stack. Half of these are text symbols
+  // and half are pictographs; an emoji font renders a tick as a COLOUR
+  // glyph and ignores the fill entirely, which is why the tick came out in
+  // a colour nobody chose. The pictographs have no symbol-font glyph and
+  // fall through to the emoji font on their own.
+  page_icon: (x, y, nameP, size, colP) => {
+    const col = ink(readText(colP));
+    if (!col) return 0;
+    ctx.fillStyle = col;
+    const side = size || 16;
+    face(side + 'px "Segoe UI Symbol", "Apple Symbols", "Segoe UI Emoji", "Apple Color Emoji", serif');
+    // The list says "an icon of this size, at this corner". Where the glyph
+    // the painter substitutes sits inside that square is the painter's own
+    // business, and the middle is where it belongs.
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(ICONS[readText(nameP)] || '·', x + side / 2, y + side / 2);
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    return 1;
+  },
+  // A ring, or a slice of one. Veil counts degrees clockwise from twelve
+  // o'clock, which is how anybody reading a dial counts them.
+  page_arc: (x, y, outer, thick, from, to, colP) => {
+    const col = ink(readText(colP));
+    const r = (outer || 0) - (thick || 0) / 2;
+    if (!col || r <= 0) return 0;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, r, (from - 90) * Math.PI / 180, (to - 90) * Math.PI / 180);
+    ctx.strokeStyle = col; ctx.lineWidth = thick || 1; ctx.lineCap = 'butt';
+    ctx.stroke();
+    ctx.restore();
+    return 1;
+  },
+  // A filled outline. Points arrive as "x,y x,y ..." already in pixels.
+  page_path: (ptsP, colP) => {
+    const col = ink(readText(colP));
+    const pts = readText(ptsP).trim().split(/\s+/).map(s => s.split(',').map(Number));
+    if (!col || pts.length < 2) return 0;
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.closePath();
+    ctx.fillStyle = col; ctx.fill();
+    return 1;
+  },
+  page_image: (x, y, pathP, w, h) => {
+    const img = pictureOf(readText(pathP));
+    if (img) ctx.drawImage(img, x, y, w, h);
+    return 1;
+  },
+  page_sprite: (x, y, pathP, scale) => {
+    const img = pictureOf(readText(pathP));
+    if (!img) return 0;
+    const k = (scale || 100) / 100;
+    ctx.drawImage(img, x, y, img.width * k, img.height * k);
+    return 1;
+  },
+  // Nine-slice: the corners keep their size, the edges stretch along one
+  // way and the middle stretches both.
+  page_nine: (x, y, w, h, pathP, corner) => {
+    const img = pictureOf(readText(pathP));
+    if (!img) return 0;
+    const s = corner || 8, iw = img.width, ih = img.height;
+    const cols = [[0, s], [s, iw - 2*s], [iw - s, s]];
+    const rows = [[0, s], [s, ih - 2*s], [ih - s, s]];
+    const dcols = [[x, s], [x + s, w - 2*s], [x + w - s, s]];
+    const drows = [[y, s], [y + s, h - 2*s], [y + h - s, s]];
+    for (let r = 0; r < 3; r++) for (let q = 0; q < 3; q++) {
+      if (cols[q][1] <= 0 || rows[r][1] <= 0 || dcols[q][1] <= 0 || drows[r][1] <= 0) continue;
+      ctx.drawImage(img, cols[q][0], rows[r][0], cols[q][1], rows[r][1],
+                         dcols[q][0], drows[r][0], dcols[q][1], drows[r][1]);
+    }
+    return 1;
+  },
+};
+
+// --- one frame ------------------------------------------------------------
+// Clear, call, wind the bump pointer back. That last line IS the frame
+// region: everything a frame allocated is dead the moment it is painted,
+// and what has to outlive it went to a slot.
+
+const MOVE = 1, DOWN = 2, UP = 3, DRAG = 4, WHEEL = 5, CHAR = 6, KEY = 7;
+
+// The bump pointer lives at address 0. One DataView, kept - but wasm memory
+// GROWS, and growing hands out a new ArrayBuffer and detaches the old one.
+// A view made once and held is dead the first time the module needs another
+// page, and writing through it throws where the reset belongs, so the frame
+// region silently stops being wound back and the module runs out of memory.
+let mem0 = null, memBuf = null;
+function bump() {
+  if (memBuf !== M.buffer) { memBuf = M.buffer; mem0 = new DataView(M.buffer); }
+  return mem0;
+}
+
+function tell(what, x, y, code, mods) {
+  if (!mod) return;
+  setClip(0, 0, -1, -1);
+  ctx.setTransform(dots, 0, 0, dots, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  ctx.textBaseline = 'top';
+  ctx.lineJoin = 'round';
+  const t0 = performance.now();
+  try {
+    drawn = mod.frame(what, x | 0, y | 0, code | 0, mods | 0);
+  } finally {
+    // Everything this frame allocated is dead now. Winding the pointer back
+    // IS the frame region - and it happens even if the frame threw, because
+    // a frame that does not give its memory back takes the next one down
+    // with it, and the one after that, until the module is out of memory.
+    bump().setUint32(0, floor, true);
+  }
+  spent = performance.now() - t0;
+  setClip(0, 0, -1, -1);
+}
+
+// The canvas is 1040 wide whatever room the window gives it, so a pointer
+// at a page pixel is not at a canvas pixel. The rect is kept: asking for it
+// forces the browser to lay the page out, and a mouse asks a few hundred
+// times a second.
+let where = cv.getBoundingClientRect();
+addEventListener('resize', fit);
+addEventListener('scroll', () => { where = cv.getBoundingClientRect(); }, true);
+new ResizeObserver(fit).observe(cv);
+function spot(ev) {
+  return [Math.round((ev.clientX - where.left) * W / where.width),
+          Math.round((ev.clientY - where.top) * H / where.height)];
+}
+
+// --- one clock -------------------------------------------------------------
+// A browser frame drives everything. Events go in a queue and are drained on
+// the next frame; nothing paints outside it.
+//
+// This is what "not quite smooth" was. Motion ran off a 100 ms timer, so a
+// scroll eased at ten frames a second while the display did sixty. A wheel
+// painted the whole screen from inside its own handler, and a trackpad sends
+// a hundred of those a second - each one a full rebuild the display never
+// showed. And the status line was rewritten every frame, which is a DOM
+// parse and a page layout for a number nobody reads that fast.
+
+const waiting = [];
+let drawn = 0, spent = 0, said = '', asleep = 0, awake = 0;
+
+function later(what, x, y, code, mods) {
+  const back = waiting[waiting.length - 1];
+  // Moves collapse into each other - only the newest position matters. Wheel
+  // steps add up, so a fast flick still travels its whole distance. A press,
+  // a release and a key are each their own event and are never lost.
+  if (back && back[0] === what && (what === MOVE || what === DRAG)) {
+    back[1] = x; back[2] = y;
+    return;
+  }
+  if (back && back[0] === WHEEL && what === WHEEL) { back[2] += y; return; }
+  waiting.push([what, x, y, code | 0, mods | 0]);
+}
+
+function beat() {
+  requestAnimationFrame(beat);
+  if (!mod) return;
+  if (waiting.length === 0) {
+    // Nobody touched anything. If nothing on this screen is moving either,
+    // it is the same picture it was a moment ago - and building it again to
+    // find that out costs the whole frame. The canvas already holds it.
+    //
+    // This is the cheapest frame there is: the one nobody builds. A page
+    // with a meter on it says so and gets built; a page without one is
+    // still, and costs a single call to ask.
+    if (!mod.restless()) { asleep++; return; }
+    awake++;
+    // The clock frame. Anything that eases keeps easing, at the rate the
+    // display actually runs at.
+    tell(0, 0, 0, 0, 0);
+  } else {
+    while (waiting.length) { const e = waiting.shift(); tell(e[0], e[1], e[2], e[3], e[4]); }
+  }
+  const now = '<b>' + drawn + '</b> ritkommandon på <b>' + spent.toFixed(1) + ' ms</b> — veil i wasm, ingen server'
+    + (asleep ? ' · <b>' + Math.round(asleep * 100 / (asleep + awake)) + ' %</b> av ramarna behövde inte byggas' : '');
+  if (now !== said) { said = now; statusEl.innerHTML = now; }
+}
+
+let down = false;
+cv.addEventListener('pointermove', e => { const at = spot(e); later(down ? DRAG : MOVE, at[0], at[1], 0, 0); });
+// Whether a finger or a mouse is doing this. It matters in exactly one
+// place: a finger dragging empty space is scrolling, a mouse is not.
+const finger = e => (e.pointerType === 'touch' || e.pointerType === 'pen') ? 1 : 0;
+cv.addEventListener('pointerdown', e => {
+  down = true;
+  cv.setPointerCapture(e.pointerId);
+  const at = spot(e); later(DOWN, at[0], at[1], 0, finger(e));
+});
+addEventListener('pointerup', e => {
+  if (!down) return;
+  down = false;
+  const at = spot(e); later(UP, at[0], at[1], 0, 0);
+});
+// How far the wheel turned, in pixels, whatever unit it chose to say it in.
+cv.addEventListener('wheel', e => {
+  e.preventDefault();
+  const px = e.deltaMode === 1 ? e.deltaY * 40 : e.deltaMode === 2 ? e.deltaY * H : e.deltaY;
+  later(WHEEL, 0, Math.round(px), 0, 0);
+}, { passive: false });
+// A key belongs to whatever the screen says is being typed into. Codes for
+// the ones that MOVE, a character for the rest - the split every editor makes.
+const KEYS = { Backspace: 8, Delete: 46, ArrowLeft: 37, ArrowRight: 39, ArrowUp: 38, ArrowDown: 40, Home: 36, End: 35, Enter: 13, Tab: 9, Escape: 27 };
+addEventListener('keydown', e => {
+  if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) later(CHAR, 0, 0, e.key.codePointAt(0), 0);
+  else if (KEYS[e.key] !== undefined) {
+    e.preventDefault();
+    later(KEY, 0, 0, KEYS[e.key], (e.shiftKey ? 1 : 0) + (e.ctrlKey ? 2 : 0));
+  }
+});
+
+// The clipboard is the browser's, so it is asked and answered here. Text
+// crosses as a pointer into linear memory, the same way it does everywhere
+// else at this seam.
+addEventListener('copy', e => {
+  if (!mod) return;
+  const s = readText(mod.picked_text());
+  if (!s) return;
+  e.clipboardData.setData('text/plain', s);
+  e.preventDefault();
+});
+addEventListener('cut', e => {
+  if (!mod) return;
+  const s = readText(mod.picked_text());
+  if (!s) return;
+  e.clipboardData.setData('text/plain', s);
+  e.preventDefault();
+  mod.cut_out();
+});
+addEventListener('paste', e => {
+  if (!mod) return;
+  const s = e.clipboardData.getData('text/plain');
+  if (!s) return;
+  e.preventDefault();
+  mod.paste_in(allocText(s));
+});
+
+// --- boot -----------------------------------------------------------------
+// The face has to be in place before the first frame: a painter drawing in
+// a face nobody measured paints a different program however right its
+// rectangles are. It is the very TTF the resolver measured with.
+(async () => {
+  try {
+    const face = new FontFace('VeilBody', await (await fetch('Inter-Regular.subset.ttf')).arrayBuffer());
+    await face.load();
+    document.fonts.add(face);
+  } catch (err) {
+    statusEl.textContent = 'ritar i en annan face an den som matte: ' + err.message;
+  }
+  const src = await WebAssembly.instantiateStreaming(fetch('gallery.wasm'), { env: env });
+  mod = src.instance.exports;
+  M = mod.memory;
+  mod.boot();
+  fit();                              // tell it how much room it has
+  // Where the bump pointer stands once the program has started: everything
+  // above this line is one frame's worth and is thrown away after each.
+  floor = bump().getUint32(0, true);
+  requestAnimationFrame(beat);
+})();
+</script>
+</body>
+</html>
