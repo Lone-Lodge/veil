@@ -82,7 +82,10 @@ function pictureOf(name) {
   const img = new Image();
   img.onload = () => { pictures.set(name, img); };
   img.onerror = () => pictures.set(name, null);
-  img.src = 'art/' + encodeURIComponent(name);
+  // A name may carry folders - `assets/panel9.png` - so each piece is
+  // encoded on its own; encoding the whole name turned the slash into %2F
+  // and every picture 404'd.
+  img.src = 'art/' + name.split('/').map(encodeURIComponent).join('/');
   pictures.set(name, null);
   return null;
 }
@@ -271,6 +274,47 @@ function paintFrame(cmdsPtr, count, wordsPtr) {
 let GL = null;
 const F = 1 / 255;
 
+// --- what has not changed since the frame before --------------------------
+//
+// A screen where one meter moves says the same hundred and forty six things
+// it said last time, and reading them again to arrive at the same instances
+// was the biggest single thing a frame did. So the block is kept, and a
+// command whose numbers AND words match the one at its place last time hands
+// over the instances it made then. Twenty four numbers copied, against a
+// walk through its letters.
+//
+// The two word offsets are left OUT of the number comparison and their
+// CONTENT compared instead: a line that got a character longer moves every
+// offset after it without changing a single thing on screen.
+let wasCmds = new Int32Array(0), wasWords = new Int32Array(0);
+let wasSpan = new Int32Array(0), wasFrom = new Int32Array(0), wasCount = -1;
+let nowCmds = new Int32Array(0), nowWords = new Int32Array(0);
+let nowSpan = new Int32Array(0), nowFrom = new Int32Array(0);
+let kmdKept = 0;
+
+function roomForBlock(count, words) {
+  if (nowCmds.length < count * 12) {
+    nowCmds = new Int32Array(count * 12); wasCmds = new Int32Array(count * 12);
+    nowSpan = new Int32Array(count);      wasSpan = new Int32Array(count);
+    nowFrom = new Int32Array(count);      wasFrom = new Int32Array(count);
+    wasCount = -1;
+  }
+  if (nowWords.length < words) {
+    nowWords = new Int32Array(words); wasWords = new Int32Array(words);
+    wasCount = -1;
+  }
+}
+
+// A word is a length and then its bytes. Two of them are the same word when
+// they are the same length and the same bytes, wherever each of them lies.
+function sameWord(a, b) {
+  if (a < 0 || b < 0) return a === b;
+  const n = nowWords[a];
+  if (n !== wasWords[b]) return false;
+  for (let i = 1; i <= n; i++) if (nowWords[a + i] !== wasWords[b + i]) return false;
+  return true;
+}
+
 // `#rrggbb` or `#rrggbbaa`, with or without the hash, as four numbers.
 function hexInk(t) {
   const hex = t.charCodeAt(0) === 35 ? t.slice(1) : t;
@@ -284,12 +328,49 @@ function glFrame(cmdsPtr, count, wordsPtr) {
   if (!g) return paintFrame(cmdsPtr, count, wordsPtr);
   const d = bump();
   const cmdAt = cmdsPtr + 4, wordAt0 = wordsPtr + 4;
-  const num = (i) => d.getInt32(cmdAt + i * 4, true);
-  const wordNum = (i) => d.getInt32(wordAt0 + i * 4, true);
+  const wordRoom = d.getInt32(wordsPtr, true);
   drawn = count;
+
+  // The whole block out of wasm memory in one pass, into plain arrays this
+  // side. It is read many times over what follows, and a DataView call is
+  // not free the way an element read is.
+  roomForBlock(count, wordRoom);
+  { const swapC = wasCmds; wasCmds = nowCmds; nowCmds = swapC;
+    const swapW = wasWords; wasWords = nowWords; nowWords = swapW;
+    const swapS = wasSpan; wasSpan = nowSpan; nowSpan = swapS;
+    const swapF = wasFrom; wasFrom = nowFrom; nowFrom = swapF; }
+  for (let i = 0, n = count * 12; i < n; i++) nowCmds[i] = d.getInt32(cmdAt + i * 4, true);
+  for (let i = 0; i < wordRoom; i++) nowWords[i] = d.getInt32(wordAt0 + i * 4, true);
+
+  const num = (i) => nowCmds[i];
+  const wordNum = (i) => nowWords[i];
+  // Places only line up when the two frames say the same NUMBER of things.
+  const lineUp = count === wasCount;
+  let clipDrifted = false;
+  kmdKept = 0;
+
   g.begin(W, H);
   for (let i = 0, at = 0; i < count; i++, at += 12) {
     const kind = num(at);
+    nowFrom[i] = g.at();
+    nowSpan[i] = 0;
+    // Ten numbers and two words. A clip makes no instances but sets what
+    // every instance after it is cut to, so one that moved makes everything
+    // after it new until a later clip puts the setting back.
+    let held = lineUp;
+    if (held) {
+      for (let j = 0; j < 10; j++) if (nowCmds[at + j] !== wasCmds[at + j]) { held = false; break; }
+      if (held) held = sameWord(num(at + 10), wasCmds[at + 10]) && sameWord(num(at + 11), wasCmds[at + 11]);
+    }
+    if (kind === 3) { if (!held) clipDrifted = true; }
+    // Only the kinds that ARE instances can be handed over as instances. A
+    // polygon draws itself on the side and leaves none behind, so handing
+    // over its nothing drew nothing: the chart vanished the moment it
+    // stopped changing. Pictures are the same, when they arrive.
+    else if (held && !clipDrifted && kind >= 1 && kind <= 6) {
+      const n = wasSpan[i];
+      if (g.reuse(wasFrom[i], n) >= 0) { nowSpan[i] = n; kmdKept++; continue; }
+    }
     const colour = num(at + 5);
     if (colour === -2 && kind !== 3 && kind < 8) continue;
     const x = num(at + 1), y = num(at + 2), w = num(at + 3), h = num(at + 4);
@@ -361,10 +442,38 @@ function glFrame(cmdsPtr, count, wordsPtr) {
       const pts = [];
       for (const one of said) { const xy = one.split(','); if (xy.length === 2) pts.push(+xy[0], +xy[1]); }
       if (pts.length >= 6) g.polygon(pts, r, gr, b, a, W, H);
+    } else if (kind >= 8) {
+      // A picture is the same box with its own sheet. A tint of -2 is no
+      // tint at all, which is white: the picture's own colours.
+      const name = wordFrom(wordNum, num(at + 10));
+      const spot = g.artFor(name, pictureOf(name));
+      if (spot) {
+        const S = g.artSize();
+        const tr = colour === -2 ? 1 : r, tg = colour === -2 ? 1 : gr;
+        const tb = colour === -2 ? 1 : b, ta = colour === -2 ? 1 : a;
+        const quad = (dx, dy, dw, dh, sx, sy, sw, sh) => {
+          if (dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0) return;
+          g.put(dx, dy, dw, dh, 0, 0, 0, 0, tr, tg, tb, ta, 4, 0, 0,
+                (spot.x + sx) / S, (spot.y + sy) / S, (spot.x + sx + sw) / S, (spot.y + sy + sh) / S);
+        };
+        if (kind === 8) quad(x, y, w, h, 0, 0, spot.w, spot.h);
+        else if (kind === 10) { const k = (num(at + 6) || 100) / 100; quad(x, y, spot.w * k, spot.h * k, 0, 0, spot.w, spot.h); }
+        else {
+          // Nine pieces: the corners keep their size, the edges stretch one
+          // way and the middle stretches both.
+          const c = num(at + 6) || 8;
+          const sc = [[0, c], [c, spot.w - 2 * c], [spot.w - c, c]];
+          const sr = [[0, c], [c, spot.h - 2 * c], [spot.h - c, c]];
+          const dc = [[x, c], [x + c, w - 2 * c], [x + w - c, c]];
+          const dr = [[y, c], [y + c, h - 2 * c], [y + h - c, c]];
+          for (let q = 0; q < 3; q++) for (let e = 0; e < 3; e++)
+            quad(dc[q][0], dr[e][0], dc[q][1], dr[e][1], sc[q][0], sr[e][0], sc[q][1], sr[e][1]);
+        }
+      }
     }
-    // Pictures are still the reader above's job: there is no art in this
-    // example, and a texture apiece is the next thing this file learns.
+    nowSpan[i] = g.at() - nowFrom[i];
   }
+  wasCount = count;
   g.flush(W, H);
   return count;
 }
@@ -482,6 +591,10 @@ const env = {
   __slot_set: (k, v) => { slots.put(k, v); return 0; },
   __slot_set_text: (k, v) => { slots.put(k, slots.grab(v)); return 0; },
   __slot_get_int: (k) => { const e = slots.find(k); return (e !== undefined && typeof e.v === 'number') ? e.v : 0; },
+  // A slot carries a real too. Here the store keeps a JS number either way,
+  // so the pair below is the same lookup with a double on the wire.
+  __slot_set_real: (k, v) => { slots.put(k, v); return 0; },
+  __slot_get_real: (k) => { const e = slots.find(k); return (e !== undefined && typeof e.v === 'number') ? e.v : 0; },
   __slot_get: (k) => { const e = slots.find(k); return allocBytes((e !== undefined && e.v instanceof Uint8Array) ? e.v : EMPTY); },
   __slot_has: (k) => (slots.find(k) !== undefined ? 1 : 0),
   __now: () => Math.round(performance.now() - began),

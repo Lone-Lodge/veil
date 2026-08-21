@@ -3,23 +3,69 @@
 # A theme is a flat list of (role, style) entries. The resolver
 # walks it deterministically — order matters, last-write wins.
 
-use veil_role
-use veil_token
 
 # radius: corner rounding in px, 0 = square. size: text size in px, 0 =
 # "no opinion", which the resolver reads as its 13px body default. Both used
 # to live only as per-node props, so a document had to carry `radius: 7` and
 # `size: 12` - a document saying how a thing LOOKS, which is the theme's job.
 # A node prop still wins where one thing genuinely differs.
-public type StyleRule: role_name: text, padding: int, gap: int, fg_colour: text, bg_colour: text, direction: text, radius: int, size: int, border: int, border_colour: text, shadow: int, shadow_colour: text
+
+use veil_role
+
+public type StyleRule: role_name: text, padding: number, gap: number, fg_colour: text, bg_colour: text, direction: text, radius: number, size: number, border: number, border_colour: text, shadow: number, shadow_colour: text
 
 public type Theme: rules: [StyleRule]
 
 public define empty_theme() -> Theme:
     Theme{rules: []}
 
-# direction: "" or "column" = children stack vertically (the default).
-# direction: "row" = children flow left-to-right on the same y.
+# --- writing one -------------------------------------------------------------
+#
+# A StyleRule has twelve fields and an app should not have to write all of
+# them to say "this one is a heading". These two are what every app that used
+# veil wrote for itself first.
+#
+# A rule named `button:lit` is the `button` rule while that node is in state
+# `lit`; `lookup_state` finds it.
+
+# `way` is "" or "column" (children stack down the page) or "row" (children
+# flow left to right on the same y).
+public define styled(name: text, pad: number, gap: number, fg: text, bg: text, way: text, radius: number, size: number) -> StyleRule:
+    dressed(name, pad, gap, fg, bg, way, radius, size, 0.0, "", 0.0, "")
+
+public define dressed(name: text, pad: number, gap: number, fg: text, bg: text, way: text, radius: number, size: number, border: number, edge: text, blur: number, shade: text) -> StyleRule:
+    StyleRule{role_name: name, padding: pad, gap: gap, fg_colour: fg, bg_colour: bg, direction: way,
+              radius: radius, size: size, border: border, border_colour: edge, shadow: blur, shadow_colour: shade}
+
+# A theme that draws, so an app can put a document on the screen before it
+# has decided what it looks like. Six roles, light and dark, the same rules
+# that lived in `veil_theme_web` - which was never about the web, and was one
+# orb and two unreadable one-liners for what these are.
+#
+# A role with no rule here draws nothing, which is veil saying it does not
+# know that word. An app adds its own rows; the last match wins.
+
+public define default_theme() -> Theme:
+    edit r = []
+    r = append(r, styled("button",  12.0,  8.0, "#fff",    "#0ea5e9", "", 0.0, 0.0))
+    r = append(r, styled("heading",  0.0, 16.0, "#0f172a", "",        "", 0.0, 0.0))
+    r = append(r, styled("text",     0.0,  8.0, "#334155", "",        "", 0.0, 0.0))
+    r = append(r, styled("panel",   16.0, 12.0, "#0f172a", "#f8fafc", "", 0.0, 0.0))
+    r = append(r, styled("card",    16.0, 12.0, "#0f172a", "#fff",    "", 0.0, 0.0))
+    r = append(r, styled("input",    8.0,  0.0, "#0f172a", "#fff",    "", 0.0, 0.0))
+    Theme{rules: r}
+
+# The same six roles, inverted.
+public define dark_theme() -> Theme:
+    edit r = []
+    r = append(r, styled("button",  12.0,  8.0, "#0f172a", "#38bdf8", "", 0.0, 0.0))
+    r = append(r, styled("heading",  0.0, 16.0, "#f1f5f9", "",        "", 0.0, 0.0))
+    r = append(r, styled("text",     0.0,  8.0, "#cbd5e1", "",        "", 0.0, 0.0))
+    r = append(r, styled("panel",   16.0, 12.0, "#f1f5f9", "#020617", "", 0.0, 0.0))
+    r = append(r, styled("card",    16.0, 12.0, "#f1f5f9", "#0f172a", "", 0.0, 0.0))
+    r = append(r, styled("input",    8.0,  0.0, "#f1f5f9", "#1e293b", "", 0.0, 0.0))
+    Theme{rules: r}
+
 public define lookup_style(theme: Theme, role: Role) -> StyleRule:
     lookup_state(theme, role, "")
 
@@ -65,7 +111,7 @@ public define lookup_state(theme: Theme, role: Role, state: text) -> StyleRule:
 # the new place. A theme that changed shape costs one slow lookup per role,
 # once.
 define plain_rule(theme: Theme, name: text) -> StyleRule:
-    was = slot_get_int("veil:at:{name}")
+    was = slot_get_number("veil:at:{name}")
     if was > 0 and was <= length(theme.rules):
         there = theme.rules[was - 1]
         if there.role_name is name:

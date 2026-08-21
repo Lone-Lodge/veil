@@ -13,28 +13,10 @@
 # Every one of those expectations is now an assertion with the same documented
 # value, the summary says how many held, and a failure exits non-zero so
 # `atlas/tools/gates.sh` can see it.
-use ori_geometry
-use veil_token
-use veil_role
-use veil_signal
-use veil_document
-use veil_theme
-use ori_display
-use veil_interaction
-use veil_measure
-use veil_motion
-use veil_edit
-use veil_resolver
-use veil_web
-use veil_theme_web
-use veil_inventory
-use veil_showcase
-use os
-use typeface
 
 # How many of these lines are wider than they were allowed to be. 0 is the
 # only acceptable answer; anything else means the greedy fit is broken.
-define over_wide(lines: [text], size: int, face: Font, max_w: int) -> int:
+define over_wide(lines: [text], size: number, face: Font, max_w: number) -> number:
     edit bad = 0
     loop l in lines:
         if text_size(l, size, face).wide > max_w:
@@ -57,16 +39,16 @@ define text_top_in(list: DisplayList, top: number, bottom: number) -> truth:
 # compiler keeps its own counters.
 
 define chk_bump(key: text):
-    prev = if slot_has(key) then slot_get_int(key) else 0
+    prev = if slot_has(key) then slot_get_number(key) else 0
     slot_set(key, prev + 1)
 
-define chk_pass() -> int:
-    if slot_has("veil:pass") then slot_get_int("veil:pass") else 0
+define chk_pass() -> number:
+    if slot_has("veil:pass") then slot_get_number("veil:pass") else 0
 
-define chk_fail() -> int:
-    if slot_has("veil:fail") then slot_get_int("veil:fail") else 0
+define chk_fail() -> number:
+    if slot_has("veil:fail") then slot_get_number("veil:fail") else 0
 
-define check(label: text, want: int, got: int):
+define check(label: text, want: number, got: number):
     if want is got:
         chk_bump("veil:pass")
         print_line("  ok   {label}")
@@ -94,7 +76,7 @@ define section(name: text):
     print_line("")
     print_line("{name}")
 
-define main() -> int:
+define main() -> number:
     print_line("Veil — pure Orion · check suite")
     print_line("version: 0.0.1")
 
@@ -836,7 +818,7 @@ define main() -> int:
     # a wall of text that reads fine at a glance.
     if failed is 0 then 0 else 1
 
-define cmd_count(list: DisplayList) -> int:
+define cmd_count(list: DisplayList) -> number:
     edit c = 0
     loop _cmd in list.commands:
         c = c + 1
@@ -851,14 +833,14 @@ define itag(i: Interaction) -> text:
 
 # The scalar payload of a non-pointer intent (key code / scroll delta), or the
 # x pixel of a pointer one — the axis `classify` documents for `x`.
-define iscalar(i: Interaction) -> int:
+define iscalar(i: Interaction) -> number:
     choose i:
         PressAt(x, _) then x
         ReleaseAt(x, _) then x
         KeyPress(k) then k
         Scroll(d) then d
 
-define scene_nodes(doc: SemanticDocument) -> int:
+define scene_nodes(doc: SemanticDocument) -> number:
     edit count = 0
     loop _node in doc.nodes:
         count = count + 1

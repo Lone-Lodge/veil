@@ -8,26 +8,26 @@
 
 # One reactive int cell. `dirty` is set on creation and every write, cleared
 # by clear_dirty once a derivation has consumed it.
-public type IntCell: id: int, value: int, dirty: truth
+public type IntCell: id: number, value: number, dirty: truth
 
 # The signal store: all cells + the next id to hand out.
-public type SignalStore: cells: [IntCell], next_id: int
+public type SignalStore: cells: [IntCell], next_id: number
 
 public define empty_store() -> SignalStore:
     SignalStore{cells: [], next_id: 1}
 
 # Allocating a signal grows the store AND yields the new id — paired so the
 # caller threads both and derivation stays pure.
-public type SignalAlloc: store: SignalStore, id: int
+public type SignalAlloc: store: SignalStore, id: number
 
-public define signal_int(store: SignalStore, initial: int) -> SignalAlloc:
+public define signal_int(store: SignalStore, initial: number) -> SignalAlloc:
     id = store.next_id
     cell = IntCell{id: id, value: initial, dirty: true}
     SignalAlloc{store: SignalStore{cells: append(store.cells, cell), next_id: id + 1}, id: id}
 
 # Read a signal by id. Missing id reads 0 (a signal that was never allocated
 # is indistinguishable from one holding 0 — the graceful default).
-public define signal_get(store: SignalStore, id: int) -> int:
+public define signal_get(store: SignalStore, id: number) -> number:
     edit found = 0
     loop cell in store.cells:
         if cell.id is id:
@@ -35,7 +35,7 @@ public define signal_get(store: SignalStore, id: int) -> int:
     found
 
 # Write a new value and mark the cell dirty. Unknown id is a no-op.
-public define signal_set(store: SignalStore, id: int, new_value: int) -> SignalStore:
+public define signal_set(store: SignalStore, id: number, new_value: number) -> SignalStore:
     edit out = []
     loop cell in store.cells:
         if cell.id is id:

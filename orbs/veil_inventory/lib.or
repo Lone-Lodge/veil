@@ -8,15 +8,13 @@
 # hover/focus/press, selection, and keyboard navigation — all on a
 # pure Document IR.
 
-use veil_document
-use veil_role
 
 # One inventory entry. Quantity is `0...9999` so the compiler packs
 # it as `u16` (range types, §8) — 65× less RAM for big inventories
 # than a Rust BTreeMap of i64s.
-public type Item: name: text, quantity: 0...9999, rarity: text, weight_grams: int
+public type Item: name: text, quantity: 0...9999, rarity: text, weight_grams: number
 
-public type Inventory: items: [Item], selected_index: int
+public type Inventory: items: [Item], selected_index: number
 
 public define empty_inventory() -> Inventory:
     Inventory{items: [], selected_index: 0}
@@ -26,23 +24,23 @@ public define empty_inventory() -> Inventory:
 public define demo_inventory() -> Inventory:
     Inventory{items: [Item{name: "Sword of dawn", quantity: 1, rarity: "epic", weight_grams: 1800}, Item{name: "Health potion", quantity: 12, rarity: "common", weight_grams: 50}, Item{name: "Map fragment", quantity: 3, rarity: "rare", weight_grams: 5}, Item{name: "Iron ore", quantity: 47, rarity: "common", weight_grams: 200}, Item{name: "Phoenix feather", quantity: 1, rarity: "legendary", weight_grams: 1}], selected_index: 0}
 
-public define select(inventory: Inventory, index: int) -> Inventory:
+public define select(inventory: Inventory, index: number) -> Inventory:
     Inventory{items: inventory.items, selected_index: index}
 
 # Move selection by +1/-1, clamped to the item count. Hooks into the
 # keyboard arrow keys at the web shell.
-public define move_selection(inventory: Inventory, delta: int) -> Inventory:
+public define move_selection(inventory: Inventory, delta: number) -> Inventory:
     new_index = inventory.selected_index + delta
     clamped = clamp_index(new_index, item_count(inventory))
     Inventory{items: inventory.items, selected_index: clamped}
 
-define item_count(inventory: Inventory) -> int:
+define item_count(inventory: Inventory) -> number:
     edit count = 0
     loop _item in inventory.items:
         count = count + 1
     count
 
-define clamp_index(value: int, max_exclusive: int) -> int:
+define clamp_index(value: number, max_exclusive: number) -> number:
     if value < 0:
         0
     else:

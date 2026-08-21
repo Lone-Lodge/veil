@@ -19,19 +19,18 @@
 # starts fast and settles - the shape every interface uses, and the one
 # that never overshoots however long a frame takes.
 
-use text
 
 # How long a change takes to arrive. One number, not a knob: a UI where
 # every control picks its own timing reads as sloppy, and 130ms is the
 # span that registers as instant while still being visibly smooth.
-public define ease_ms() -> int = 130
+public define ease_ms() -> number = 130
 
 # Anything moved in the last fifth of a second counts as still moving, so
 # an app that only draws when something changed keeps drawing until the
 # motion has landed. Without it the first frame of a fade is also the last.
-define linger_ms() -> int = 200
+define linger_ms() -> number = 200
 
-define stamp(now: int) -> int:
+define stamp(now: number) -> number:
     slot_set("veil:m:live", now)
 
 # Whether anything is still on its way. An app gates its redraw on this
@@ -39,7 +38,7 @@ define stamp(now: int) -> int:
 public define motion_busy() -> truth:
     if not slot_has("veil:m:live"):
         return false
-    monotonic_ms() - slot_get_int("veil:m:live") < linger_ms()
+    monotonic_ms() - slot_get_number("veil:m:live") < linger_ms()
 
 # --- one number on its way somewhere ---------------------------------------
 
@@ -50,13 +49,13 @@ public define motion_busy() -> truth:
 # moving, and a box that is not moving does not move what is inside it.
 # Worth asking, because a scrolling box that has landed can be skipped along
 # with everything under it.
-public define landed(key: text, target: int) -> truth:
+public define landed(key: text, target: number) -> truth:
     kv = "veil:m:v:{key}"
     if not slot_has(kv):
         return true
-    slot_get_int(kv) is target
+    slot_get_number(kv) is target
 
-public define smooth(key: text, target: int) -> int:
+public define smooth(key: text, target: number) -> number:
     kv = "veil:m:v:{key}"
     kt = "veil:m:t:{key}"
     now = monotonic_ms()
@@ -64,11 +63,11 @@ public define smooth(key: text, target: int) -> int:
         put = slot_set(kv, target)
         mark = slot_set(kt, now)
         return target
-    at_now = slot_get_int(kv)
+    at_now = slot_get_number(kv)
     if at_now is target:
         rest = slot_set(kt, now)
         return target
-    step = now - slot_get_int(kt)
+    step = now - slot_get_number(kt)
     # A gap longer than the whole ease lands the value outright, which is
     # what you want after a window drag or a sleep - no long crawl to
     # catch up with where things already are.
@@ -95,7 +94,7 @@ public define smooth(key: text, target: int) -> int:
 # A tooltip is a hover that lasted. The clock is already here, so the count
 # is too - an app that had to keep its own would end up with one timer per
 # control, all slightly out of step.
-public define hovered_for(name: text) -> int:
+public define hovered_for(name: text) -> number:
     if name is "":
         return 0
     k = "veil:h:{name}"
@@ -103,10 +102,10 @@ public define hovered_for(name: text) -> int:
     if not slot_has(k):
         put = slot_set(k, now)
         return 0
-    now - slot_get_int(k)
+    now - slot_get_number(k)
 
 # The pointer left, so the count starts over next time.
-public define hover_left(name: text) -> int:
+public define hover_left(name: text) -> number:
     if name is not "":
         slot_set("veil:h:{name}", monotonic_ms())
     0
@@ -115,7 +114,7 @@ public define hover_left(name: text) -> int:
 # not movements: a box that now holds something ELSE has not scrolled, it
 # has been replaced, and sliding it from where the last thing happened to
 # sit is a lie about what just happened.
-public define motion_set(key: text, v: int) -> int:
+public define motion_set(key: text, v: number) -> number:
     put = slot_set("veil:m:v:{key}", v)
     slot_set("veil:m:t:{key}", monotonic_ms())
 
@@ -123,15 +122,15 @@ public define motion_set(key: text, v: int) -> int:
 # Colours travel as one packed number so the whole thing is a single value
 # in the store, and each channel arrives when the others do.
 
-define nib(c: int) -> int:
+define nib(c: number) -> number:
     if c >= 48 and c < 58 then c - 48 else if c >= 97 and c < 103 then c - 87 else if c >= 65 and c < 71 then c - 55 else 0
 
-define hex2(b: [int], i: int) -> int:
+define hex2(b: [number], i: number) -> number:
     nib(byte_at(b, i)) * 16 + nib(byte_at(b, i + 1))
 
 # `#rrggbb` or `#rrggbbaa` as one number. Anything else - a gradient, a
 # name, an empty string - has no channels to walk and says so with -1.
-public define packed(c: text) -> int:
+public define packed(c: text) -> number:
     b = bytes_of(c)
     n = bytes_count(b)
     if n < 7 or byte_at(b, 0) is not 35:
@@ -142,13 +141,13 @@ public define packed(c: text) -> int:
     a = if n >= 9 then hex2(b, 7) else 255
     r * 16777216 + g * 65536 + bl * 256 + a
 
-define digit(v: int) -> text:
+define digit(v: number) -> text:
     part("0123456789abcdef", v, v + 1)
 
-define two(v: int) -> text:
+define two(v: number) -> text:
     "{digit(v // 16)}{digit(v % 16)}"
 
-public define unpacked(v: int) -> text:
+public define unpacked(v: number) -> text:
     "#{two(v // 16777216 % 256)}{two(v // 65536 % 256)}{two(v // 256 % 256)}{two(v % 256)}"
 
 # --- a colour, as ONE value -------------------------------------------------
@@ -162,10 +161,10 @@ public define unpacked(v: int) -> text:
 # would send blue through green on its way to nothing - but they are read
 # and written together, which is where the cost was.
 
-define chan(v: int, i: int) -> int:
+define chan(v: number, i: number) -> number:
     if i is 0 then v // 16777216 % 256 else if i is 1 then v // 65536 % 256 else if i is 2 then v // 256 % 256 else v % 256
 
-define toward(now_at: int, want: int, step: int) -> int:
+define toward(now_at: number, want: number, step: number) -> number:
     gap = want - now_at
     if gap is 0:
         return want
@@ -192,14 +191,14 @@ public define smooth_colour(key: text, target: text) -> text:
         put = slot_set(kv, lit)
         mark = slot_set("veil:m:d:{key}", monotonic_ms())
         return target
-    at_now = slot_get_int(kv)
+    at_now = slot_get_number(kv)
     # Fading out keeps the colour and takes the alpha away.
     want = if target is "" then at_now // 256 * 256 else lit
     if at_now is want:
         rest = slot_set("veil:m:d:{key}", monotonic_ms())
         return if want % 256 is 0 then "" else unpacked(want)
     now = monotonic_ms()
-    step = now - slot_get_int("veil:m:d:{key}")
+    step = now - slot_get_number("veil:m:d:{key}")
     if step >= ease_ms() or step < 0:
         done = slot_set(kv, want)
         mark = slot_set("veil:m:d:{key}", now)

@@ -1,0 +1,13 @@
+[package]
+name = "veil-smallest"
+version = "0.0.1"
+
+# What an app needs to use veil, and nothing else. If this list has to grow
+# for the app below to build, veil got harder to consume and the gate says so.
+[orbs]
+veil_document = "path:../../orbs/veil_document"
+veil_resolver = "path:../../orbs/veil_resolver"
+veil_theme = "path:../../orbs/veil_theme"
+veil_page = "path:../../orbs/veil_page"
+typeface = "path:../../../orion/orbs/typeface"
+ori_geometry = "path:../../../orion/orbs/ori_geometry"

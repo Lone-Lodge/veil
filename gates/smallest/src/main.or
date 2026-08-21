@@ -1,0 +1,41 @@
+# The smallest thing that draws, and the README's claim that it is enough.
+#
+# If veil ever stops being usable from the outside - a helper that went
+# private, a type that moved, a `use` that is no longer enough - this stops
+# compiling, and it stops compiling before an app finds out.
+use veil_document
+use veil_resolver
+use veil_theme
+use veil_page
+use typeface
+use ori_geometry
+
+define screen() -> SemanticDocument:
+    a = append([], n("label", [p("text", "Hej")], []))
+    b = append(a, n("panel", [p("pad", "16"), p("layout", "flow")], [top(a)]))
+    SemanticDocument{root: top(b), nodes: b}
+
+# A theme is a list of rules, one per role. A role with no rule draws
+# nothing at all, which is why `empty_theme()` gives an empty screen.
+# A theme is a list of rules, one per role. A role with no rule draws
+# nothing at all, which is why `empty_theme()` gives an empty screen.
+define rule(name: text, pad: number, gap: number, fg: text, bg: text, dir_name: text, radius: number, size: number) -> StyleRule:
+    StyleRule{role_name: name, padding: pad, gap: gap, fg_colour: fg, bg_colour: bg, direction: dir_name, radius: radius, size: size, border: 0.0, border_colour: "", shadow: 0.0, shadow_colour: ""}
+
+define dress() -> Theme:
+    a = append([], rule("panel", 16.0, 8.0, "", "#1a1a1e", "column", 10.0, 0.0))
+    b = append(a, rule("label", 0.0, 0.0, "#e6e6e6", "", "row", 0.0, 14.0))
+    Theme{rules: b}
+
+public define main() -> number:
+    room = Rect{x: 0.0, y: 0.0, wide: 800.0, high: 600.0}
+    here = first_frame(screen(), dress(), font_body(), room)
+    later = next_frame(here, screen(), dress(), font_body(), room)
+    # Two frames, and the second one says the same thing as the first.
+    print_line("smallest: {length(here.list.commands)} kommandon, berattad {length(later.list.commands)}")
+    print_line("noder {length(screen().nodes)} · placerade {length(here.placed)} · regler {length(dress().rules)}")
+    print_line("under pekaren: {pick_placed(screen(), dress(), later.placed, 20.0, 20.0)}")
+    # A screen that draws nothing is not a passing gate.
+    require length(here.list.commands) > 0
+    require length(later.list.commands) is length(here.list.commands)
+    0

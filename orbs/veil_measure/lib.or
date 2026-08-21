@@ -1,11 +1,13 @@
 # veil_measure — layout computation.
 
-use ori_geometry
-use typeface
-use text
 
 # A measured node — final pixel rect after layout pass.
-public type Measured: node_id: int, rect: Rect
+
+use typeface
+use ori_geometry
+use text
+
+public type Measured: node_id: number, rect: Rect
 
 # Real text metrics: the line measured by the shared engine face
 # (typeface — the same TTF advances every renderer draws with), width
@@ -37,17 +39,17 @@ public type Measured: node_id: int, rect: Rect
 # instructions a slot key is hashed with. Two lines share a name only if
 # they are the same length AND hash alike, which for the few hundred lines
 # on a screen is not something that happens.
-define measured_key(content: text, size_px: int) -> text:
+define measured_key(content: text, size_px: number) -> text:
     "tm:{size_px}:{length(content)}:{text_hash(content)}"
 
-public define text_size(content: text, size_px: int, face: Font) -> Size:
+public define text_size(content: text, size_px: number, face: Font) -> Size:
     # ONE lookup, not two. A slot nobody set answers 0 on every backend, so
     # storing one MORE than the packed answer makes zero mean "never
     # measured" - and asking `slot_has` first only to ask again hashed the
     # same key twice for every one of the fifteen hundred measurements a
     # screen makes.
     memo = measured_key(content, size_px)
-    packed = slot_get_int(memo)
+    packed = slot_get_number(memo)
     if packed > 0:
         return Size{wide: to_real((packed - 1) // 65536), high: to_real((packed - 1) % 65536)}
     fresh = text_size_slow(content, size_px, face)
@@ -61,7 +63,7 @@ public define text_size(content: text, size_px: int, face: Font) -> Size:
         slot_set(memo, w * 65536 + h + 1)
     fresh
 
-define text_size_slow(content: text, size_px: int, face: Font) -> Size:
+define text_size_slow(content: text, size_px: number, face: Font) -> Size:
     scale = to_real(size_px) / to_real(face.upm)
     letters = bytes_of(plain_of(content))
     n = bytes_count(letters)
@@ -85,7 +87,7 @@ define text_size_slow(content: text, size_px: int, face: Font) -> Size:
 
 # The height of one line of this face at this size. Wrapping needs it, and
 # so does anything stacking lines, so there is one answer.
-public define line_high(size_px: int, face: Font) -> int:
+public define line_high(size_px: number, face: Font) -> number:
     scale = to_real(size_px) / to_real(face.upm)
     to_whole(to_real(font_ascent(face) - font_descent(face)) * scale + 0.5)
 
@@ -100,8 +102,8 @@ public define line_high(size_px: int, face: Font) -> int:
 # the markers are simply not counted. Wrapping, the caret and everything
 # else that walks text keep working exactly as they did.
 
-define marker_open() -> int = 91
-define marker_shut() -> int = 93
+define marker_open() -> number = 91
+define marker_shut() -> number = 93
 
 # The line with its markers taken out: what it actually reads as, and
 # what every measurement is of.
@@ -132,7 +134,7 @@ public define plain_of(content: text) -> text:
             i = j
     out
 
-public define has_runs(b: [int], n: int) -> truth:
+public define has_runs(b: [number], n: number) -> truth:
     edit any = false
     loop i in 0 until n:
         if byte_at(b, i) is marker_open():
@@ -177,7 +179,7 @@ public define runs_of(content: text) -> [text]:
 # and every list, every table cell and every breadcrumb needs it.
 #
 # Whole characters only, so it can never stop halfway through an å.
-public define trim_to(content: text, size_px: int, face: Font, max_w: int) -> text:
+public define trim_to(content: text, size_px: number, face: Font, max_w: number) -> text:
     if max_w <= 0 or text_size(content, size_px, face).wide <= max_w:
         return content
     tail = "..."
@@ -227,7 +229,7 @@ public define hard_lines(content: text) -> [text]:
     # inline here - the text orb has the same note on itself.
     lines(content)
 
-public define wrap_text(content: text, size_px: int, face: Font, max_w: int) -> [text]:
+public define wrap_text(content: text, size_px: number, face: Font, max_w: number) -> [text]:
     paras = hard_lines(content)
     if length(paras) > 1:
         edit all_of = []
@@ -237,7 +239,7 @@ public define wrap_text(content: text, size_px: int, face: Font, max_w: int) -> 
         return all_of
     wrap_one(content, size_px, face, max_w)
 
-define wrap_one(content: text, size_px: int, face: Font, max_w: int) -> [text]:
+define wrap_one(content: text, size_px: number, face: Font, max_w: number) -> [text]:
     if max_w <= 0 or length(content) is 0:
         return [content]
     # Each word measured ONCE and the running width carried along. The
@@ -269,7 +271,7 @@ define wrap_one(content: text, size_px: int, face: Font, max_w: int) -> [text]:
 # line, and how far along it. Editing wrapped text is impossible without
 # this - the caret has a place in the STRING and has to be given a place
 # on the SCREEN, measured with the same advances that drew the letters.
-public define caret_spot(content: text, size_px: int, face: Font, max_w: int, mark: int) -> Size:
+public define caret_spot(content: text, size_px: number, face: Font, max_w: number, mark: number) -> Size:
     lines = wrap_text(content, size_px, face, max_w)
     edit seen = 0
     edit row = 0
@@ -299,7 +301,7 @@ public define caret_spot(content: text, size_px: int, face: Font, max_w: int, ma
 
 # The other way round: a point in the block becomes a byte offset. What a
 # click in wrapped text has to answer.
-public define caret_from(content: text, size_px: int, face: Font, max_w: int, px: int, py: int) -> int:
+public define caret_from(content: text, size_px: number, face: Font, max_w: number, px: number, py: number) -> number:
     lines = wrap_text(content, size_px, face, max_w)
     if length(lines) is 0:
         return 0
@@ -319,9 +321,9 @@ public define caret_from(content: text, size_px: int, face: Font, max_w: int, px
 # walks every word in it and the answer is asked for three times a frame:
 # once to size the box, once to place it, once to draw it. Thirty of these a
 # screen, and each one was twenty-five word measurements.
-public define wrapped_high(content: text, size_px: int, face: Font, max_w: int) -> int:
+public define wrapped_high(content: text, size_px: number, face: Font, max_w: number) -> number:
     memo = "wh:{size_px}:{max_w}:{length(content)}:{text_hash(content)}"
-    seen = slot_get_int(memo)
+    seen = slot_get_number(memo)
     if seen > 0:
         return seen - 1
     tall = length(wrap_text(content, size_px, face, max_w)) * line_high(size_px, face)
@@ -333,7 +335,7 @@ public define wrapped_high(content: text, size_px: int, face: Font, max_w: int) 
 # is to walk the same advances the renderer draws with. Lands on the NEARER
 # side of a character, so clicking a letter's right half puts the caret
 # after it - which is what every editor does and what your hand expects.
-public define caret_at(content: text, size_px: int, face: Font, x: int) -> int:
+public define caret_at(content: text, size_px: number, face: Font, x: number) -> number:
     scale = to_real(size_px) / to_real(face.upm)
     b = bytes_of(content)
     n = bytes_count(b)
@@ -366,9 +368,9 @@ public define caret_at(content: text, size_px: int, face: Font, x: int) -> int:
 # its own width: the box it ends up in is its parent's business, and a
 # paragraph that reported its whole unbroken line made every ancestor
 # claim a width no one was going to give it.
-public define widest_word(content: text, size_px: int, face: Font) -> int:
+public define widest_word(content: text, size_px: number, face: Font) -> number:
     memo = "ww:{size_px}:{length(content)}:{text_hash(content)}"
-    seen = slot_get_int(memo)
+    seen = slot_get_number(memo)
     if seen > 0:
         return seen - 1
     edit widest = 0

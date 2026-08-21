@@ -18,7 +18,7 @@ define read_it(node: Node, key: text) -> text:
             break
     found
 
-public define bench() -> int:
+public define bench() -> number:
     node = Node{role: role("blk"), props: [NodeProp{key: "w", content: "80"}, NodeProp{key: "h", content: "20"}, NodeProp{key: "text", content: "hej"}, NodeProp{key: "pad", content: "4"}], children: []}
     edit hits = 0
     loop _i in 0 until 19095:
@@ -27,28 +27,28 @@ public define bench() -> int:
     hits
 
 # Just the document: 161 nodes built by chained append.
-public define bench_build() -> int:
+public define bench_build() -> number:
     g = screen("kontroller", "", 0, "Utforskare|Konsol")
     length(gallery_doc(g).nodes)
 
 # Just the layout, on a document built once.
-public define bench_layout() -> int:
+public define bench_layout() -> number:
     face = font_body()
     dress = gallery_theme()
     doc = gallery_doc(screen("kontroller", "", 0, "Utforskare|Konsol"))
     length(layout_in(doc, dress, face, box()))
 
 # Just the theme.
-public define bench_theme() -> int:
+public define bench_theme() -> number:
     length(gallery_theme().rules)
 
 # Just the font.
-public define bench_font() -> int:
+public define bench_font() -> number:
     font_body().upm
 
 # A hundred measurements of a typical line - times sixteen is the 1611
 # a screen makes. More than a hundred and the bump allocator is gone.
-public define bench_text() -> int:
+public define bench_text() -> number:
     face = font_body()
     edit w = 0
     loop _i in 0 until 100:
@@ -57,13 +57,13 @@ public define bench_text() -> int:
 
 # The same measurement asked for 1611 times - what a cache would cost
 # instead: one measure and 1610 nothings.
-public define bench_text_once() -> int:
+public define bench_text_once() -> number:
     face = font_body()
     text_size("Rad 1 - en rad vars namn ar for langt", 13, face).wide
 
 # Just building the memo key, a hundred times: what the lookup costs before
 # it has looked anything up.
-public define bench_key() -> int:
+public define bench_key() -> number:
     edit n = 0
     loop i in 0 until 100:
         k = "tm:13:Rad 1 - en rad vars namn ar for langt"
@@ -72,7 +72,7 @@ public define bench_key() -> int:
     n
 
 # Key built the way text_size builds it - with interpolation.
-public define bench_key_built() -> int:
+public define bench_key_built() -> number:
     line = "Rad 1 - en rad vars namn ar for langt"
     edit n = 0
     loop i in 0 until 100:
@@ -81,21 +81,21 @@ public define bench_key_built() -> int:
             n = n + 1
     n
 
-public define bench_counts() -> int:
+public define bench_counts() -> number:
     face = font_body()
     dress = gallery_theme()
     doc = gallery_doc(screen("kontroller", "", 0, "Utforskare|Konsol"))
     m = layout_in(doc, dress, face, box())
-    print_line("scale_now={slot_get_int("cnt:scale")}")
+    print_line("scale_now={slot_get_number("cnt:scale")}")
     length(m)
 
 # Does a slot nobody set answer 0, or fault? If it answers, the memo can
 # stop asking twice.
-public define bench_missing() -> int:
-    slot_get_int("aldrig:satt:nyckel:xyz")
+public define bench_missing() -> number:
+    slot_get_number("aldrig:satt:nyckel:xyz")
 
 # The measuring pass alone - one bottom-up walk that gives every node a size.
-public define bench_measure() -> int:
+public define bench_measure() -> number:
     face = font_body()
     dress = gallery_theme()
     doc = gallery_doc(screen("kontroller", "", 0, "Utforskare|Konsol"))
@@ -103,7 +103,7 @@ public define bench_measure() -> int:
 
 # Everything the layout does EXCEPT the layout: build the document, the
 # theme and the font. Subtract this from bench_layout for the real number.
-public define bench_setup() -> int:
+public define bench_setup() -> number:
     face = font_body()
     dress = gallery_theme()
     doc = gallery_doc(screen("kontroller", "", 0, "Utforskare|Konsol"))
@@ -111,22 +111,22 @@ public define bench_setup() -> int:
 
 # What does ONE slot lookup cost? Every memo in the framework pays it, and
 # the motion store pays it twice a frame per moving thing.
-public define bench_slot_hit() -> int:
+public define bench_slot_hit() -> number:
     slot_set("bench:key:one", 7)
     edit n = 0
     loop i in 0 until 1000:
-        n = n + slot_get_int("bench:key:one")
+        n = n + slot_get_number("bench:key:one")
     n
 
 # The same, with a DIFFERENT key each time - which is what a memo does.
-public define bench_slot_spread() -> int:
+public define bench_slot_spread() -> number:
     edit n = 0
     loop i in 0 until 1000:
-        n = n + slot_get_int("bench:spread:{i % 200}")
+        n = n + slot_get_number("bench:spread:{i % 200}")
     n
 
 # And a write.
-public define bench_slot_set() -> int:
+public define bench_slot_set() -> number:
     edit n = 0
     loop i in 0 until 1000:
         slot_set("bench:w:{i % 200}", i)
@@ -136,14 +136,14 @@ public define bench_slot_set() -> int:
 # Does appending to the SAME name grow in place, or copy the whole list
 # every time? Two hundred appends: in place is a few kilobytes, copying is
 # two hundred times that.
-public define bench_append() -> int:
+public define bench_append() -> number:
     edit xs = []
     loop i in 0 until 200:
         xs = append(xs, i)
     length(xs)
 
 # And setting an element - in place, or a fresh list each time?
-public define bench_set() -> int:
+public define bench_set() -> number:
     edit xs = []
     loop i in 0 until 200:
         xs = append(xs, 0)
@@ -153,7 +153,7 @@ public define bench_set() -> int:
 
 # A document of plain boxes - no text, no wrapping, no floats - so what is
 # left is what a node costs to lay out at all.
-define plain_doc(n: int) -> SemanticDocument:
+define plain_doc(n: number) -> SemanticDocument:
     edit ns = []
     edit kids = []
     loop i in 0 until n:
@@ -162,39 +162,39 @@ define plain_doc(n: int) -> SemanticDocument:
     ns = append(ns, Node{role: role("bar"), props: [NodeProp{key: "layout", content: "column"}, NodeProp{key: "gap", content: "4"}], children: kids})
     SemanticDocument{root: n, nodes: ns}
 
-public define bench_plain() -> int:
+public define bench_plain() -> number:
     face = font_body()
     dress = gallery_theme()
     length(layout_in(plain_doc(160), dress, face, box()))
 
 # The same document built but not laid out, so the building can be taken off.
-public define bench_plain_build() -> int:
+public define bench_plain_build() -> number:
     length(plain_doc(160).nodes)
 
-public define bench_plain40() -> int:
+public define bench_plain40() -> number:
     face = font_body()
     dress = gallery_theme()
     length(layout_in(plain_doc(40), dress, face, box()))
 
-public define bench_plain80() -> int:
+public define bench_plain80() -> number:
     face = font_body()
     dress = gallery_theme()
     length(layout_in(plain_doc(80), dress, face, box()))
 
-public define bench_plain320() -> int:
+public define bench_plain320() -> number:
     face = font_body()
     dress = gallery_theme()
     length(layout_in(plain_doc(320), dress, face, box()))
 
 # The plain document, measured only - no placement.
-public define bench_plain_measure() -> int:
+public define bench_plain_measure() -> number:
     face = font_body()
     dress = gallery_theme()
     length(measure_all(plain_doc(160), dress, face).box)
 
 # The plain document, styles only - what measure_all does before it
 # measures anything: one style lookup per node.
-public define bench_plain_styles() -> int:
+public define bench_plain_styles() -> number:
     dress = gallery_theme()
     doc = plain_doc(160)
     edit n = 0
@@ -204,7 +204,7 @@ public define bench_plain_styles() -> int:
     n
 
 # 3851 reads of the scale - what the layout actually does.
-public define bench_scale() -> int:
+public define bench_scale() -> number:
     edit n = 0
     loop i in 0 until 3851:
         n = n + scale_now()
@@ -212,16 +212,16 @@ public define bench_scale() -> int:
 
 # The same number of reads with a ONE-character key: is it the hashing of
 # the name or the lookup itself?
-public define bench_scale_short() -> int:
+public define bench_scale_short() -> number:
     slot_set("s", 100)
     edit n = 0
     loop i in 0 until 3851:
-        n = n + slot_get_int("s")
+        n = n + slot_get_number("s")
     n
 
 # Painting alone, on a layout done once: what turning boxes into draw
 # commands costs.
-public define bench_paint() -> int:
+public define bench_paint() -> number:
     face = font_body()
     dress = gallery_theme()
     doc = gallery_doc(screen("kontroller", "", 0, "Utforskare|Konsol"))
@@ -229,7 +229,7 @@ public define bench_paint() -> int:
     length(resolve_placed(doc, dress, face, placed).commands)
 
 # And the same for plain boxes, so the text side can be told apart.
-public define bench_paint_plain() -> int:
+public define bench_paint_plain() -> number:
     face = font_body()
     dress = gallery_theme()
     doc = plain_doc(160)
@@ -238,7 +238,7 @@ public define bench_paint_plain() -> int:
 
 # The same tree with ONE raised thing on it - which used to mean walking
 # every node again for every layer between.
-define raised_doc(n: int, top: int) -> SemanticDocument:
+define raised_doc(n: number, top: number) -> SemanticDocument:
     edit ns = []
     edit kids = []
     loop i in 0 until n:
@@ -249,7 +249,7 @@ define raised_doc(n: int, top: int) -> SemanticDocument:
     ns = append(ns, Node{role: role("bar"), props: [NodeProp{key: "layout", content: "column"}, NodeProp{key: "gap", content: "4"}], children: kids})
     SemanticDocument{root: n + 1, nodes: ns}
 
-public define bench_raised() -> int:
+public define bench_raised() -> number:
     face = font_body()
     dress = gallery_theme()
     doc = raised_doc(160, 4)
@@ -258,7 +258,7 @@ public define bench_raised() -> int:
 
 # A whole frame told from the one before, with NOTHING changed - the
 # cheapest case, and the one a screen sitting still is in.
-public define bench_frame_same() -> int:
+public define bench_frame_same() -> number:
     face = font_body()
     dress = gallery_theme()
     doc = gallery_doc(screen("kontroller", "", 0, "Utforskare|Konsol"))
@@ -267,7 +267,7 @@ public define bench_frame_same() -> int:
 
 # The pointer moved onto a button: ONE node says a different word. This is
 # what an interactive screen actually does between frames.
-public define bench_frame_hover() -> int:
+public define bench_frame_hover() -> number:
     face = font_body()
     dress = gallery_theme()
     cold = gallery_doc(screen("kontroller", "", 0, "Utforskare|Konsol"))
@@ -276,7 +276,7 @@ public define bench_frame_hover() -> int:
     length(next_frame(was, warm, dress, face, box()).list.commands)
 
 # Only the cold frame, so the warm one can be told apart from it.
-public define bench_frame_cold() -> int:
+public define bench_frame_cold() -> number:
     face = font_body()
     dress = gallery_theme()
     doc = gallery_doc(screen("kontroller", "", 0, "Utforskare|Konsol"))
@@ -284,7 +284,7 @@ public define bench_frame_cold() -> int:
 
 # The cold frame plus building the second document, without telling a frame
 # from it - so the document build is not counted as savings.
-public define bench_frame_cold2() -> int:
+public define bench_frame_cold2() -> number:
     face = font_body()
     dress = gallery_theme()
     doc = gallery_doc(screen("kontroller", "", 0, "Utforskare|Konsol"))
@@ -295,7 +295,7 @@ public define bench_frame_cold2() -> int:
 # A HUD, not a gallery page: what a small screen costs end to end, laid out
 # AND painted. The gallery is a stress test with a hundred and sixty boxes
 # of text; a game draws a couple of dozen.
-public define bench_hud(n: int) -> int:
+public define bench_hud(n: number) -> number:
     face = font_body()
     dress = gallery_theme()
     doc = plain_doc(n)
@@ -304,7 +304,7 @@ public define bench_hud(n: int) -> int:
 # The parts of a told frame, so its quarter of a millisecond can be put
 # where it goes. Each one includes everything before it: subtract to get
 # the piece.
-public define bench_again() -> int:
+public define bench_again() -> number:
     face = font_body()
     dress = gallery_theme()
     g = held_gallery()
@@ -312,7 +312,7 @@ public define bench_again() -> int:
     a = first_frame(doc, dress, face, box())
     length(measure_again(doc, dress, face, a.doc, a.sizes).box)
 
-public define bench_placed() -> int:
+public define bench_placed() -> number:
     face = font_body()
     dress = gallery_theme()
     g = held_gallery()

@@ -11,7 +11,7 @@ set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 ORION=$(cd "$HERE/../../../orion" && pwd)
 mkdir -p "$HERE/build"
-bash "$ORION/tools/bundle_app.sh" "$HERE" "$HERE/build/gallery.or" "$HERE/../../orbs" "$HERE/../../../atlas/orbs"
+bash "$ORION/tools/bundle_app.sh" "$HERE/src/app.or" "$HERE/build/gallery.or" "$HERE/../../orbs" "$HERE/../../../atlas/orbs"
 "$ORION/dist/orion.exe" "$HERE/build/gallery.or" "$HERE/gallery.wasm"
 # The very face the layout was measured with, served beside the module.
 # A painter drawing in a face nobody measured paints a different program

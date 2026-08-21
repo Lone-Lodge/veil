@@ -6,12 +6,6 @@
 # (thin-client: core runs in the local process, the browser is a
 # dumb canvas), out of wasm linear memory tomorrow. Same contract.
 
-use ori_display
-use veil_document
-use veil_resolver
-use veil_theme
-use typeface
-use text
 # Serialise a resolved DisplayList to the fixed JSON contract:
 #   {"commands":[{"kind":"rect","x":..,"y":..,"w":..,"h":..,"color":".."},
 #                {"kind":"text","x":..,"y":..,"text":"..","color":".."}]}
@@ -19,6 +13,15 @@ use text
 # growing text copies everything already written, so a hundred and fifty
 # commands copied about a megabyte to produce fourteen kilobytes - the cost
 # grew with the square of how many there were.
+
+use veil_document
+use veil_theme
+use veil_resolver
+use ori_display
+use ori_geometry
+use typeface
+use text
+
 public define display_list_json(list: DisplayList) -> text:
     edit pieces = []
     loop cmd in list.commands:
@@ -50,36 +53,36 @@ define cmd_json(cmd: DrawCmd) -> text:
         DrawImage(p, path, w, h, tint, blend, src) then image_json(p, path, w, h, tint, src)
         DrawSprite(p, path, scale, src) then sprite_json(p, path, scale, src)
 
-define shadow_json(r: Rect, colour: text, rad: int, blur: int, src: int) -> text:
+define shadow_json(r: Rect, colour: text, rad: number, blur: number, src: number) -> text:
     "\{\"kind\":\"shadow\",\"x\":{r.x},\"y\":{r.y},\"w\":{r.wide},\"h\":{r.high},\"radius\":{rad},\"blur\":{blur},\"src\":{src},\"color\":\"" + colour + "\"\}"
 
-define clip_json(r: Rect, rad: int, src: int) -> text:
+define clip_json(r: Rect, rad: number, src: number) -> text:
     "\{\"kind\":\"clip\",\"x\":{r.x},\"y\":{r.y},\"w\":{r.wide},\"h\":{r.high},\"radius\":{rad},\"src\":{src}\}"
 
-define arc_json(mid: Point, outer: int, thick: int, from_deg: int, to_deg: int, colour: text, src: int) -> text:
+define arc_json(mid: Point, outer: number, thick: number, from_deg: number, to_deg: number, colour: text, src: number) -> text:
     "\{\"kind\":\"arc\",\"x\":{mid.x},\"y\":{mid.y},\"outer\":{outer},\"thick\":{thick},\"from\":{from_deg},\"to\":{to_deg},\"src\":{src},\"color\":\"" + colour + "\"\}"
 
-define nine_json(r: Rect, path: text, corner: int, tint: text, blend: text, src: int) -> text:
+define nine_json(r: Rect, path: text, corner: number, tint: text, blend: text, src: number) -> text:
     "\{\"kind\":\"nine\",\"x\":{r.x},\"y\":{r.y},\"w\":{r.wide},\"h\":{r.high},\"corner\":{corner},\"src\":{src},\"image\":\"" + path + "\",\"tint\":\"" + tint + "\",\"blend\":\"" + blend + "\"\}"
 
-define path_json(points: text, colour: text, src: int) -> text:
+define path_json(points: text, colour: text, src: number) -> text:
     "\{\"kind\":\"path\",\"points\":\"" + points + "\",\"src\":{src},\"color\":\"" + colour + "\"\}"
 
-define image_json(p: Point, path: text, w: int, h: int, tint: text, src: int) -> text:
+define image_json(p: Point, path: text, w: number, h: number, tint: text, src: number) -> text:
     "\{\"kind\":\"image\",\"x\":{p.x},\"y\":{p.y},\"w\":{w},\"h\":{h},\"src\":{src},\"image\":\"" + path + "\",\"tint\":\"" + tint + "\"\}"
 
-define sprite_json(p: Point, path: text, scale: int, src: int) -> text:
+define sprite_json(p: Point, path: text, scale: number, src: number) -> text:
     "\{\"kind\":\"sprite\",\"x\":{p.x},\"y\":{p.y},\"scale\":{scale},\"src\":{src},\"image\":\"" + path + "\"\}"
 
-define rect_json(r: Rect, colour: text, corners: text, src: int) -> text:
+define rect_json(r: Rect, colour: text, corners: text, src: number) -> text:
     "\{\"kind\":\"rect\",\"x\":{r.x},\"y\":{r.y},\"w\":{r.wide},\"h\":{r.high},\"src\":{src},\"radius\":\"" + corners + "\",\"color\":\"" + colour + "\"\}"
 
-define text_json(p: Point, content: text, colour: text, size: int, src: int) -> text:
+define text_json(p: Point, content: text, colour: text, size: number, src: number) -> text:
     x = p.x
     y = p.y
     "\{\"kind\":\"text\",\"x\":{x},\"y\":{y},\"size\":{size},\"src\":{src},\"text\":\"" + content + "\",\"color\":\"" + colour + "\"\}"
 
-define icon_json(p: Point, icon: text, size: int, colour: text, src: int) -> text:
+define icon_json(p: Point, icon: text, size: number, colour: text, src: number) -> text:
     "\{\"kind\":\"icon\",\"x\":{p.x},\"y\":{p.y},\"size\":{size},\"src\":{src},\"icon\":\"" + icon + "\",\"color\":\"" + colour + "\"\}"
 
 # Generic renderer: document × theme → display list → JSON. The

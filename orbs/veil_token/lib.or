@@ -3,11 +3,11 @@
 # "No margins; gap/pad only" - the Rust crate's invariant. Tokens
 # are named scalars the theme assembles into role styles.
 
-public type Spacing: name: text, pixels: int
+public type Spacing: name: text, pixels: number
 public type Colour: name: text, r: 0...255, g: 0...255, b: 0...255, a: 0...255
-public type Radius: name: text, pixels: int
+public type Radius: name: text, pixels: number
 
-public define spacing(name: text, pixels: int) -> Spacing:
+public define spacing(name: text, pixels: number) -> Spacing:
     Spacing{name: name, pixels: pixels}
 
 # --- token reference resolution (the shared design-token chase) ------------
@@ -17,7 +17,6 @@ public define spacing(name: text, pixels: int) -> Spacing:
 # palette through ONE algorithm - the first step of folding theme/tokens into
 # Veil (ARCHITECTURE.md step 5).
 
-use bytes
 
 public type TokenRef: name: text, literal: text
 

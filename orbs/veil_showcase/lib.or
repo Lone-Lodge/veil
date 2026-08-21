@@ -4,8 +4,6 @@
 # wasm shim. Orion's port lets each scene be a fn that returns its
 # Document — the resolver + theme do the rest.
 
-use veil_document
-use veil_role
 
 # Demo 1: a single button, sized by its label.
 public define button_scene() -> SemanticDocument:

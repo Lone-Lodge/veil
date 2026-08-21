@@ -38,7 +38,12 @@ function makeGl(canvas) {
     vec2 pos = i_box.xy - pad + a_at * (i_box.zw + pad * 2.0);
     v_at = pos;
     v_box = i_box; v_radii = i_radii; v_ink = i_ink; v_clip = i_clip; v_more = i_more; v_uv = i_uv;
-    v_uvAt = mix(i_uv.xy, i_uv.zw, a_at);
+    // Across the REAL box, not the grown one. Laying the sheet out over the
+    // grown quad stretched every letter by a pixel in each direction, so no
+    // texel landed on a pixel and the whole screen read soft. The letters
+    // are drawn onto the sheet with two pixels of clear margin, which is
+    // where the pad goes.
+    v_uvAt = mix(i_uv.xy, i_uv.zw, (pos - i_box.xy) / max(i_box.zw, vec2(1.0)));
     gl_Position = vec4(pos / u_screen * vec2(2.0, -2.0) + vec2(-1.0, 1.0), 0.0, 1.0);
   }`;
 
@@ -48,6 +53,7 @@ function makeGl(canvas) {
   in vec4 v_box; in vec4 v_radii; in vec4 v_ink; in vec4 v_clip; in vec4 v_more; in vec4 v_uv;
   in vec2 v_uvAt;
   uniform sampler2D u_atlas;
+  uniform sampler2D u_art;
   out vec4 colour;
 
   // Distance from a point to a rounded box, negative inside. The corner is
@@ -86,10 +92,11 @@ function makeGl(canvas) {
     }
     if (kind > 0.5 && kind < 1.5) cover *= texture(u_atlas, v_uvAt).r;   // a letter
     // A slide of colour is the same box with a second colour riding where a
-    // letter would have kept its place on the sheet.
-    vec4 ink = kind > 2.5
-      ? mix(v_ink, v_uv, clamp((v_at.y - v_box.y) / max(v_box.w, 1.0), 0.0, 1.0))
-      : v_ink;
+    // letter would have kept its place on the sheet. A picture is the same
+    // box again, with its own sheet, and the ink it carries tints it.
+    vec4 ink = v_ink;
+    if (kind > 2.5 && kind < 3.5) ink = mix(v_ink, v_uv, clamp((v_at.y - v_box.y) / max(v_box.w, 1.0), 0.0, 1.0));
+    else if (kind > 3.5) ink = texture(u_art, v_uvAt) * v_ink;
     float clipAway = boxAway(v_at, v_clip, vec4(v_more.x));
     float clipAa = fwidth(clipAway);
     cover *= 1.0 - smoothstep(-clipAa, clipAa, clipAway);
@@ -126,6 +133,7 @@ function makeGl(canvas) {
   const plain = build(PLAIN_VERT, PLAIN_FRAG);
   const uScreen = gl.getUniformLocation(prog, 'u_screen');
   const uAtlas = gl.getUniformLocation(prog, 'u_atlas');
+  const uArt = gl.getUniformLocation(prog, 'u_art');
   const pScreen = gl.getUniformLocation(plain, 'u_screen');
   const pInk = gl.getUniformLocation(plain, 'u_ink');
 
@@ -137,7 +145,12 @@ function makeGl(canvas) {
   const STRIDE = 24;                    // floats per instance
   let room = 4096;
   let bank = new Float32Array(room * STRIDE);
-  let many = 0;
+  // The frame before, kept whole. A screen where one meter moves says the
+  // same hundred and forty six things it said last time, and an instance
+  // that has not changed is twenty four numbers already sitting here.
+  let kept = new Float32Array(room * STRIDE);
+  let keptMany = 0;
+  let many = 0, sent = 0;
   const inst = gl.createBuffer();
 
   const va = gl.createVertexArray();
@@ -216,6 +229,9 @@ function makeGl(canvas) {
       for (const f of faces.values()) { f.glyphs.clear(); f.rows.clear(); }
       penX = 1; penY = 1; penRow = 0; pen.clearRect(0, 0, ATLAS, ATLAS);
       dirty = [0, 0, ATLAS, ATLAS];
+      // Every letter just moved, so no instance from the frame before points
+      // at the right picture any more. Nothing is reusable from here on.
+      keptMany = 0;
     }
     pen.clearRect(penX, penY, w, h);
     pen.fillStyle = '#fff';
@@ -258,6 +274,60 @@ function makeGl(canvas) {
     gl.texSubImage2D(gl.TEXTURE_2D, 0, x0, y0, w, h, gl.RED, gl.UNSIGNED_BYTE, only);
   }
 
+  // --- the pictures --------------------------------------------------------
+  // The same idea as the letters, in colour. A UI's art is icons and panels
+  // and they are small, so they go on ONE sheet and a picture stays what
+  // everything else is: an instance in the same draw call. A picture too
+  // big for the sheet is left out rather than drawn wrong, and says so.
+  const ART = 1024;
+  const easel = document.createElement('canvas');
+  easel.width = ART; easel.height = ART;
+  const brush = easel.getContext('2d', { willReadFrequently: true });
+  const arts = new Map();
+  let artX = 1, artY = 1, artRow = 0, artDirty = null;
+  const art = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, art);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, ART, ART, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+  // Where a picture sits on the sheet, in pixels. Answers null while it is
+  // still loading and forever if it will not fit.
+  function artFor(name, img) {
+    let a = arts.get(name);
+    if (a !== undefined) return a;
+    if (!img) return null;
+    const w = img.width, h = img.height;
+    if (w + 2 > ART || h + 2 > ART) { arts.set(name, null); return null; }
+    if (artX + w + 1 >= ART) { artX = 1; artY += artRow + 1; artRow = 0; }
+    if (artY + h + 1 >= ART) { arts.set(name, null); return null; }   // the sheet is full
+    brush.clearRect(artX, artY, w, h);
+    brush.drawImage(img, artX, artY);
+    a = { x: artX, y: artY, w: w, h: h };
+    arts.set(name, a);
+    artDirty = artDirty
+      ? [Math.min(artDirty[0], artX), Math.min(artDirty[1], artY), Math.max(artDirty[2], artX + w), Math.max(artDirty[3], artY + h)]
+      : [artX, artY, artX + w, artY + h];
+    artX += w + 1;
+    if (h > artRow) artRow = h;
+    return a;
+  }
+
+  function pushArt() {
+    if (!artDirty) return;
+    const [x0, y0, x1, y1] = artDirty;
+    artDirty = null;
+    const w = x1 - x0, h = y1 - y0;
+    gl.bindTexture(gl.TEXTURE_2D, art);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, x0, y0, w, h, gl.RGBA, gl.UNSIGNED_BYTE,
+                     new Uint8Array(brush.getImageData(x0, y0, w, h).data.buffer));
+  }
+
+  const artSize = () => ART;
+
   // --- the batch -----------------------------------------------------------
   const NO_CLIP = [-1e5, -1e5, 4e5, 4e5, 0];
   let clipNow = NO_CLIP;
@@ -268,6 +338,11 @@ function makeGl(canvas) {
     const bigger = new Float32Array(room * STRIDE);
     bigger.set(bank.subarray(0, many * STRIDE));
     bank = bigger;
+    // The frame before is no longer reusable at the new size, and saying so
+    // is one flag; growing it too would copy a megabyte to keep numbers that
+    // one full frame replaces anyway.
+    kept = new Float32Array(room * STRIDE);
+    keptMany = 0;
   }
 
   function put(x, y, w, h, tl, tr, br, bl, r, g, b, a, kind, soft, thick, u0, v0, u1, v1) {
@@ -282,20 +357,29 @@ function makeGl(canvas) {
     many++;
   }
 
+  // Everything put since the last flush. The bank is NOT wound back: the
+  // whole frame stays in it, because the next frame reads its instances
+  // back out of it, and a polygon in the middle would otherwise leave only
+  // the tail behind.
   function flush(screenW, screenH) {
-    if (!many) return;
+    if (many === sent) return;
     pushAtlas();
+    pushArt();
     gl.useProgram(prog);
     gl.uniform2f(uScreen, screenW, screenH);
     gl.uniform1i(uAtlas, 0);
+    gl.uniform1i(uArt, 1);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, atlas);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, art);
+    gl.activeTexture(gl.TEXTURE0);
     gl.bindBuffer(gl.ARRAY_BUFFER, inst);
-    gl.bufferData(gl.ARRAY_BUFFER, bank.subarray(0, many * STRIDE), gl.STREAM_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, bank.subarray(sent * STRIDE, many * STRIDE), gl.STREAM_DRAW);
     gl.bindVertexArray(va);
-    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, many);
+    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, many - sent);
     gl.bindVertexArray(null);
-    many = 0;
+    sent = many;
   }
 
   // A polygon is not a box, so it breaks the run: the batch so far goes out
@@ -320,7 +404,24 @@ function makeGl(canvas) {
     gl.bindVertexArray(null);
   }
 
+  // Instances the frame before worked out, moved across as they are. `from`
+  // and `n` are in whole instances. Answers where they landed, which is what
+  // the next frame will hand back.
+  function reuse(from, n) {
+    if (from < 0 || from + n > keptMany) return -1;
+    room_for(n);
+    if (n > 0) bank.set(kept.subarray(from * STRIDE, (from + n) * STRIDE), many * STRIDE);
+    const was = many;
+    many += n;
+    return was;
+  }
+
+  const at = () => many;
+
   function begin(screenW, screenH) {
+    // This frame's instances become the next frame's kept ones.
+    const swap = kept; kept = bank; bank = swap; keptMany = many;
+    many = 0; sent = 0;
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.disable(gl.DEPTH_TEST);
     gl.enable(gl.BLEND);
@@ -328,8 +429,8 @@ function makeGl(canvas) {
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     clipNow = NO_CLIP;
-    many = 0;
   }
 
-  return { gl, put, flush, begin, polygon, faceOf, glyphOf, rowFor, clip: (c) => { clipNow = c || NO_CLIP; } };
+  return { gl, put, flush, begin, polygon, faceOf, glyphOf, rowFor, reuse, at,
+           artFor, artSize, clip: (c) => { clipNow = c || NO_CLIP; } };
 }

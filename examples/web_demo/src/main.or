@@ -36,8 +36,8 @@ use time
 use text
 use encoding
 
-define view_w() -> int = 1040
-define view_h() -> int = 720
+define view_w() -> number = 1040
+define view_h() -> number = 720
 
 define box() -> Rect:
     Rect{x: 0.0, y: 0.0, wide: to_real(view_w()), high: to_real(view_h())}
@@ -58,13 +58,13 @@ define fresh_screen() -> Gallery:
 define typed_into(g: Gallery, line: Edit) -> Gallery:
     Gallery{win_w: g.win_w, win_h: g.win_h, seconds: g.seconds, hover: g.hover, focus: g.focus, show_focus: g.show_focus, tab: g.tab, scroll: g.scroll, chosen: g.chosen, before: edit_left_of(line), picked: edit_selected(line), after: edit_right_of(line), typing: g.typing, dialog: g.dialog, lit: g.lit, menu: g.menu, menu_x: g.menu_x, menu_y: g.menu_y, picked_item: g.picked_item, open: g.open, drawer: g.drawer, zoom: g.zoom, page: g.page, dock_w: g.dock_w, dock_h: g.dock_h, dock_plan: g.dock_plan, dock_pick: g.dock_pick, dock_ws: g.dock_ws, carrying: g.carrying, carry_x: g.carry_x, carry_y: g.carry_y, over: g.over, grabbed: g.grabbed, moved: g.moved, sort_by: g.sort_by, sort_up: g.sort_up, table_at: g.table_at, contrast: g.contrast, bright: g.bright, tip: g.tip, notes: g.notes, boxes: g.boxes, note: g.note, note_at: g.note_at, note_to: g.note_to, noting: g.noting, slider: g.slider, volume: g.volume, sfx: g.sfx, vsync: g.vsync, subs: g.subs, quality: g.quality, steps: g.steps, screen: g.screen, card: g.card, slot: g.slot, bind: g.bind, key_fwd: g.key_fwd, key_jump: g.key_jump}
 
-define after_at(whole: text, from: int) -> text:
+define after_at(whole: text, from: number) -> text:
     b = bytes_of(whole)
     n = bytes_count(b)
     cut = if from > n then n else from
     text_of(bytes_part(b, cut, n))
 
-define looking(g: Gallery, hover: text, page: int, at_second: number) -> Gallery:
+define looking(g: Gallery, hover: text, page: number, at_second: number) -> Gallery:
     Gallery{win_w: g.win_w, win_h: g.win_h, seconds: at_second, hover: hover, focus: g.focus, show_focus: g.show_focus, tab: g.tab, scroll: g.scroll, chosen: g.chosen, before: g.before, picked: g.picked, after: g.after, typing: g.typing, dialog: g.dialog, lit: g.lit, menu: g.menu, menu_x: g.menu_x, menu_y: g.menu_y, picked_item: g.picked_item, open: g.open, drawer: g.drawer, zoom: g.zoom, page: page, dock_w: g.dock_w, dock_h: g.dock_h, dock_plan: g.dock_plan, dock_pick: g.dock_pick, dock_ws: g.dock_ws, carrying: g.carrying, carry_x: g.carry_x, carry_y: g.carry_y, over: g.over, grabbed: g.grabbed, moved: g.moved, sort_by: g.sort_by, sort_up: g.sort_up, table_at: g.table_at, contrast: g.contrast, bright: g.bright, tip: g.tip, notes: g.notes, boxes: g.boxes, note: g.note, note_at: g.note_at, note_to: g.note_to, noting: g.noting, slider: g.slider, volume: g.volume, sfx: g.sfx, vsync: g.vsync, subs: g.subs, quality: g.quality, steps: g.steps, screen: g.screen, card: g.card, slot: g.slot, bind: g.bind, key_fwd: g.key_fwd, key_jump: g.key_jump}
 
 # --- reading the request ----------------------------------------------------
@@ -91,7 +91,7 @@ define field(path: text, key: text) -> text:
             found = kv[1]
     found
 
-define number_of(t: text) -> int:
+define number_of(t: text) -> number:
     b = bytes_of(t)
     n = bytes_count(b)
     edit acc = 0
@@ -111,7 +111,7 @@ define starts_with(t: text, head: text) -> truth:
         return false
     text_of(bytes_part(b, 0, bytes_count(h))) is head
 
-define after(t: text, from: int) -> text:
+define after(t: text, from: number) -> text:
     b = bytes_of(t)
     n = bytes_count(b)
     cut = if from > n then n else from
@@ -122,7 +122,7 @@ define last_part(whole: text) -> text:
     if length(parts) is 0 then whole else parts[length(parts) - 1]
 
 # Which tab a name like "tab:docka" asks for, or -1 for none.
-define tab_wanted(name: text) -> int:
+define tab_wanted(name: text) -> number:
     if not starts_with(name, "tab:"):
         return 0 - 1
     want = after(name, 4)
@@ -146,11 +146,11 @@ define tab_wanted(name: text) -> int:
 # Keeping it open needs Content-Length: without it the only way a browser
 # can know the body ended is the connection closing, which is exactly the
 # thing being avoided.
-define reply(conn: int, kind: text, body: text):
+define reply(conn: number, kind: text, body: text):
     size = bytes_count(bytes_of(body))
     tcp_send(conn, "HTTP/1.1 200 OK\r\nContent-Type: {kind}\r\nContent-Length: {size}\r\nCache-Control: no-store\r\nConnection: keep-alive\r\n\r\n" + body)
 
-define main() -> int:
+define main() -> number:
     face = font_body()
     edit dress = gallery_theme()
 

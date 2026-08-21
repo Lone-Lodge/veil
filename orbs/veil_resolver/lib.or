@@ -5,17 +5,19 @@
 # single truth - the pixel you see and the pixel you hit-test come
 # from the same pass.
 
-use veil_document
-use veil_theme
-use ori_display
-use ori_geometry
-use veil_measure
-use veil_motion
-use text
-use typeface
-use bytes
 
 # The text a node presents, whichever prop carries it.
+
+use veil_document
+use veil_theme
+use veil_role
+use veil_measure
+use veil_motion
+use ori_display
+use ori_geometry
+use typeface
+use text
+
 public define node_text(node: Node) -> text:
     edit found = ""
     loop prop in node.props:
@@ -62,15 +64,15 @@ public define node_shown(node: Node) -> truth:
 #
 # Ratios are not lengths and are left alone: `grow: 2` is still twice as
 # much as `grow: 1`, and `w: 40%` is still forty per cent, at any scale.
-public define set_scale(percent: int) -> int:
+public define set_scale(percent: number) -> number:
     slot_set("veil:scale", if percent < 50 then 50 else if percent > 400 then 400 else percent)
 
 # Read once per length, and every length in the document goes through it -
 # a screen asks a couple of thousand times. Asking `slot_has` first only to
 # ask again hashed the same key twice; a scale of zero is not a scale, so
 # zero is how "nobody set one" says itself.
-public define scale_now() -> int:
-    s = slot_get_int("veil:scale")
+public define scale_now() -> number:
+    s = slot_get_number("veil:scale")
     if s is 0 then 100 else s
 
 # A length in design units, in pixels. Rounded rather than truncated, so a
@@ -82,38 +84,43 @@ public define scale_now() -> int:
 # lookup per length in the document - three thousand eight hundred of them
 # for a screen of a hundred and sixty boxes, and half of that screen's
 # layout time. It is read once where a node is worked on and carried down.
-define big(v: int, at_scale: int) -> int:
+define big(v: number, at_scale: number) -> number:
     if at_scale is 100 then v else (v * at_scale + 50) // 100
 
-define node_size(node: Node, style: StyleRule, at_scale: int) -> int:
+define node_size(node: Node, style: StyleRule, at_scale: number) -> number:
     dflt = if style.size > 0 then style.size else 13
     big(prop_int(node, "size", dflt), at_scale)
 
 # Corner rounding, the same way round: the node's own, else the role's.
-define node_radius(node: Node, style: StyleRule, at_scale: int) -> int:
+define node_radius(node: Node, style: StyleRule, at_scale: number) -> number:
     big(prop_int(node, "radius", style.radius), at_scale)
 
 # `radius: "8"` is all four corners; `radius: "8 8 0 0"` is top-left,
 # top-right, bottom-right, bottom-left. A tab is round on top and square on
 # the bottom, and so is every joined button group - one number for all four
 # cannot say it. Scaled per corner like every other length.
-define node_corners(node: Node, style: StyleRule, less: int, at_scale: int) -> text:
+# A corner is whole pixels, and it goes out as TEXT so one command can
+# carry four of them. Saying `to_whole` is not decoration: a `number` is a
+# real, and a real written into text is "10.000000" here and "10" natively -
+# and the reader on the other side takes every digit it sees, so a corner of
+# ten came back as ten million and every panel was a lozenge.
+define node_corners(node: Node, style: StyleRule, less: number, at_scale: number) -> text:
     v = prop_val(node, "radius")
     if v is "":
-        return "{cut_at(big(style.radius, at_scale), less)}"
+        return "{to_whole(cut_at(big(style.radius, at_scale), less))}"
     parts = split(v, " ")
     if length(parts) < 4:
-        return "{cut_at(big(number_in(v), at_scale), less)}"
-    "{cut_at(big(number_in(parts[0]), at_scale), less)} {cut_at(big(number_in(parts[1]), at_scale), less)} {cut_at(big(number_in(parts[2]), at_scale), less)} {cut_at(big(number_in(parts[3]), at_scale), less)}"
+        return "{to_whole(cut_at(big(number_in(v), at_scale), less))}"
+    "{to_whole(cut_at(big(number_in(parts[0]), at_scale), less))} {to_whole(cut_at(big(number_in(parts[1]), at_scale), less))} {to_whole(cut_at(big(number_in(parts[2]), at_scale), less))} {to_whole(cut_at(big(number_in(parts[3]), at_scale), less))}"
 
 # The corner of the fill inside a border is the outer corner minus the
 # border, or the border would show a fat ring at every corner and a thin
 # one along every edge.
-define cut_at(v: int, less: int) -> int:
+define cut_at(v: number, less: number) -> number:
     if v > less then v - less else 0
 
 # Border width and its colour, node prop first like everything else.
-define node_border(node: Node, style: StyleRule, at_scale: int) -> int:
+define node_border(node: Node, style: StyleRule, at_scale: number) -> number:
     big(prop_int(node, "border", style.border), at_scale)
 
 define node_border_colour(node: Node, style: StyleRule) -> text:
@@ -125,7 +132,7 @@ define node_border_colour(node: Node, style: StyleRule) -> text:
 # would push everything under it down without saying why.
 # The width a child has to work with: this node's own inner width, else
 # what came down from above, else nothing to promise.
-define inner_room(own: int, avail: int, pad: int) -> int:
+define inner_room(own: number, avail: number, pad: number) -> number:
     if own > 0:
         return own - pad * 2
     if avail > 0:
@@ -134,7 +141,7 @@ define inner_room(own: int, avail: int, pad: int) -> int:
 
 # A wrapping leaf claims the whole width it was offered - that is what
 # wrapping means. One that does not wrap is as wide as its line.
-define leaf_wide(own: int, wrapped: truth, box: int, line: int) -> int:
+define leaf_wide(own: number, wrapped: truth, box: number, line: number) -> number:
     if own > 0:
         return own
     if wrapped:
@@ -152,7 +159,7 @@ define leaf_wide(own: int, wrapped: truth, box: int, line: int) -> int:
 # Paint walks the tree once per layer, low to high. Picking walks it the
 # other way, so the raised thing answers first - a dialog that draws over
 # the page but lets its clicks through would be worse than no dialog.
-define node_layer(node: Node) -> int:
+define node_layer(node: Node) -> number:
     prop_int(node, "layer", 0)
 
 define node_clips(node: Node) -> truth:
@@ -170,7 +177,7 @@ define node_clips(node: Node) -> truth:
 # is built from nothing every frame anyway, so it has no past to move
 # from. Placement, the content extent and the scrollbar thumb all read
 # through here, so all three agree on where the list currently is.
-define glide(node: Node, what: text, target: int) -> int:
+define glide(node: Node, what: text, target: number) -> number:
     who = node_name(node)
     if who is "":
         return target
@@ -178,19 +185,19 @@ define glide(node: Node, what: text, target: int) -> int:
 
 # Put a scrolling box exactly where you say. A page showing something new
 # should BE at the top, not slide there from where the last page was.
-public define scroll_snap(name: text, at_y: int) -> int:
+public define scroll_snap(name: text, at_y: number) -> number:
     motion_set("{name}|sy", big(at_y, scale_now()))
 
-public define scroll_snap_x(name: text, at_x: int) -> int:
+public define scroll_snap_x(name: text, at_x: number) -> number:
     motion_set("{name}|sx", big(at_x, scale_now()))
 
-define node_scroll_x(node: Node) -> int:
+define node_scroll_x(node: Node) -> number:
     glide(node, "sx", big(prop_int(node, "scroll_x", 0), scale_now()))
 
 define scrolls_to_end(node: Node) -> truth:
     prop_val(node, "scroll_x") is "end"
 
-define node_scroll_y(node: Node) -> int:
+define node_scroll_y(node: Node) -> number:
     glide(node, "sy", big(prop_int(node, "scroll_y", 0), scale_now()))
 
 # `scrollbar: 1` on a clipping node draws the track and thumb itself, out
@@ -214,7 +221,7 @@ define node_rolls(node: Node) -> truth:
 # sit now, not how much there is. Adding the scroll back gives the real
 # extent - without it the content appeared to shrink as you scrolled, and
 # the thumb shot off the end of its track.
-define content_below(doc: SemanticDocument, measured: [Measured], node_id: int, box: Rect) -> int:
+define content_below(doc: SemanticDocument, measured: [Measured], node_id: number, box: Rect) -> number:
     node = doc.nodes[node_id]
     edit low = to_whole(box.y)
     loop k in node.children:
@@ -232,7 +239,7 @@ define node_shadow_colour(node: Node, style: StyleRule) -> text:
     c = prop_val(node, "shade")
     if length(c) > 0 then c else style.shadow_colour
 
-define inset(r: Rect, by: int) -> Rect:
+define inset(r: Rect, by: number) -> Rect:
     d = to_real(by)
     Rect{x: r.x + d, y: r.y + d, wide: r.wide - d * 2.0, high: r.high - d * 2.0}
 
@@ -245,23 +252,23 @@ define in_box(poly: text, r: Rect) -> text:
         if length(bits) is 2:
             px = to_whole(r.x + r.wide * to_real(number_in(bits[0])) / 1000.0)
             py = to_whole(r.y + r.high * to_real(number_in(bits[1])) / 1000.0)
-            out = if out is "" then "{px},{py}" else "{out} {px},{py}"
+            out = if out is "" then "{to_whole(px)},{to_whole(py)}" else "{out} {to_whole(px)},{to_whole(py)}"
     out
 
-define push_box(list: DisplayList, r: Rect, colour: text, corners: text, src: int) -> DisplayList:
+define push_box(list: DisplayList, r: Rect, colour: text, corners: text, src: number) -> DisplayList:
     if corners is not "0" then push_cmd(list, DrawRoundRect(r, colour, corners, src))
     else push_cmd(list, DrawRect(r, colour, src))
 
 # Cross-axis alignment as a per-mille factor of the leftover extent:
 # start = flush (0), center = half (500), end = far edge (1000).
-define align_factor(a: text) -> int:
+define align_factor(a: text) -> number:
     if a is "center" then 500 else if a is "end" then 1000 else 0
 
 # Parse a non-negative int from a prop string (digit bytes only).
 # The whole number written in a text, ignoring everything that is not a
 # digit. A document says its numbers in text, and so does an app reading
 # back the `do:` names it wrote - one reading for both.
-public define number_in(t: text) -> int:
+public define number_in(t: text) -> number:
     b = bytes_of(t)
     n = bytes_count(b)
     edit acc = 0
@@ -275,7 +282,7 @@ public define number_in(t: text) -> int:
 # fraction of the room it wants and the layout works out the pixels, which
 # is the only way a bar can be certain never to burst its own track. -1
 # when the value is not a percentage.
-define prop_percent(node: Node, key: text) -> int:
+define prop_percent(node: Node, key: text) -> number:
     v = prop_val(node, key)
     b = bytes_of(v)
     n = bytes_count(b)
@@ -287,7 +294,7 @@ define prop_percent(node: Node, key: text) -> int:
 # whether it is a per-cent, then what the number is, walked the property
 # list three times over - and measuring did that for `w` AND for `h` on
 # every node, so eight walks answered two questions.
-public type Said: spoke: truth, share: truth, amount: int
+public type Said: spoke: truth, share: truth, amount: number
 
 define said(node: Node, key: text) -> Said:
     v = prop_val(node, key)
@@ -297,7 +304,7 @@ define said(node: Node, key: text) -> Said:
     bn = bytes_count(bs)
     Said{spoke: true, share: bn >= 2 and byte_at(bs, bn - 1) is 37, amount: number_in(v)}
 
-define prop_int(node: Node, key: text, dflt: int) -> int:
+define prop_int(node: Node, key: text, dflt: number) -> number:
     v = prop_val(node, key)
     if length(v) is 0 then dflt else number_in(v)
 
@@ -320,14 +327,14 @@ define node_off(node: Node) -> truth:
 # `margin: N` - room OUTSIDE the box. Padding is room inside, and a gap
 # belongs to the row rather than to any one thing in it; a margin is the
 # one a thing carries with it wherever it is put.
-define node_margin(node: Node, at_scale: int) -> int:
+define node_margin(node: Node, at_scale: number) -> number:
     big(prop_int(node, "margin", 0), at_scale)
 
 # `aspect: "16:9"` - one side worked out from the other. A thumbnail, a
 # video, a map tile and a card image all keep their shape at any width,
 # and saying so with two numbers beats recomputing a height by hand
 # everywhere the width can change.
-define aspect_of(node: Node) -> int:
+define aspect_of(node: Node) -> number:
     v = prop_val(node, "aspect")
     if v is "":
         return 0
@@ -344,7 +351,7 @@ define node_trims(node: Node) -> truth:
 # `min_w`/`max_w`/`min_h`/`max_h`. "At least this and at most that" is the
 # commonest thing a real screen says about a box, and until now it could
 # only say one exact number or a share of its parent.
-define bounded(node: Node, which: text, v: int, at_scale: int) -> int:
+define bounded(node: Node, which: text, v: number, at_scale: number) -> number:
     least = big(prop_int(node, "min_{which}", 0), at_scale)
     most = big(prop_int(node, "max_{which}", 0), at_scale)
     held = if v < least then least else v
@@ -387,7 +394,7 @@ define style_of(theme: Theme, node: Node) -> StyleRule:
 # up for themselves, so a screen of 151 nodes scanned the theme 453 times
 # to arrive at 151 answers. An empty array means there is none yet - the
 # one-off measure_in path, which has no pass to hang a cache on.
-define ready_style(theme: Theme, node: Node, node_id: int, styles: [StyleRule]) -> StyleRule:
+define ready_style(theme: Theme, node: Node, node_id: number, styles: [StyleRule]) -> StyleRule:
     if length(styles) is 0:
         return style_of(theme, node)
     styles[node_id]
@@ -399,10 +406,10 @@ define is_row(style: StyleRule) -> truth:
 # This is what unifies the two theme models: Veil-web drives style per-ROLE
 # (theme), Atlas drives it per-ENTITY (props on the widget). The resolver reads
 # props first, falling back to the theme - so ONE resolver serves both.
-define node_pad(node: Node, style: StyleRule, at_scale: int) -> int:
+define node_pad(node: Node, style: StyleRule, at_scale: number) -> number:
     big(prop_int(node, "pad", style.padding), at_scale)
 
-define node_gap(node: Node, style: StyleRule, at_scale: int) -> int:
+define node_gap(node: Node, style: StyleRule, at_scale: number) -> number:
     big(prop_int(node, "gap", style.gap), at_scale)
 
 # How a box arranges its children, read ONCE.
@@ -411,7 +418,7 @@ define node_gap(node: Node, style: StyleRule, at_scale: int) -> int:
 # columns it has are four questions about the same word, and both passes
 # asked all four - so `layout` was the second most-read property on the
 # screen, eleven hundred times for a hundred and sixty-one boxes.
-public type Arranged: row: truth, stacked: truth, flows: truth, cols: int
+public type Arranged: row: truth, stacked: truth, flows: truth, cols: number
 
 define arranging(node: Node, style: StyleRule) -> Arranged:
     l = prop_val(node, "layout")
@@ -435,7 +442,7 @@ define node_stacks(node: Node) -> truth:
 # wrapping to a new row every N. A table, a calendar, a palette of swatches
 # - anything where the columns line up down the page, which flow cannot do
 # because flow only knows about one axis at a time.
-define node_grid(node: Node) -> int:
+define node_grid(node: Node) -> number:
     if prop_val(node, "layout") is "grid" then prop_int(node, "cols", 1) else 0
 
 # `layout: flow` is a row that carries on to the next line when it runs
@@ -449,7 +456,7 @@ define node_flows(node: Node) -> truth:
 
 # How wide and how tall a flow comes out, given the width it has. Returns
 # the height; the width is whatever it was given.
-define flow_high(doc: SemanticDocument, theme: Theme, face: Font, node: Node, room: int, gap: int, done: [Size2], wraps: [int], styles: [StyleRule], kid_w: int) -> int:
+define flow_high(doc: SemanticDocument, theme: Theme, face: Font, node: Node, room: number, gap: number, done: [Size2], wraps: [number], styles: [StyleRule], kid_w: number) -> number:
     edit line_w = 0
     edit line_h = 0
     edit total = 0
@@ -472,7 +479,7 @@ define flow_high(doc: SemanticDocument, theme: Theme, face: Font, node: Node, ro
 # child. Rows are uniform: a grid whose rows each found their own height
 # would not line up across, which is the whole reason to use one.
 # Every cell in a grid is as tall as the tallest child, so the rows line up.
-define tallest_kid(doc: SemanticDocument, theme: Theme, face: Font, node: Node, room: int) -> int:
+define tallest_kid(doc: SemanticDocument, theme: Theme, face: Font, node: Node, room: number) -> number:
     edit tall = 0
     loop k in node.children:
         if node_shown(doc.nodes[k]):
@@ -481,7 +488,7 @@ define tallest_kid(doc: SemanticDocument, theme: Theme, face: Font, node: Node, 
                 tall = h
     tall
 
-define grid_high(n: int, cols: int, cell_h: int, gap: int) -> int:
+define grid_high(n: number, cols: number, cell_h: number, gap: number) -> number:
     rows = (n + cols - 1) // cols
     if rows <= 0 then 0 else rows * cell_h + (rows - 1) * gap
 
@@ -496,13 +503,13 @@ define node_fg(node: Node, style: StyleRule) -> text:
     if length(c) > 0 then c else style.fg_colour
 
 # A node's intrinsic content size (bottom-up). Explicit `w:`/`h:` props override.
-type Size2: w: int, h: int
+type Size2: w: number, h: number
 
 # --- pass 1: intrinsic sizing ---
 # A leaf sizes to its text + padding. A container sizes to the sum of its
 # children along the main axis (+ gaps) and the max along the cross axis, + its
 # own padding. Explicit `w`/`h` props win.
-public define measure(doc: SemanticDocument, theme: Theme, face: Font, node_id: int) -> Size2:
+public define measure(doc: SemanticDocument, theme: Theme, face: Font, node_id: number) -> Size2:
     measure_in(doc, theme, face, node_id, 0)
 
 # Measuring against an available WIDTH, because wrapping text has no
@@ -510,14 +517,14 @@ public define measure(doc: SemanticDocument, theme: Theme, face: Font, node_id: 
 # and `grow` hand out width during placement, which is after measurement,
 # so the width has to come down from the parent that already knows it.
 # 0 means unconstrained: measure as one long line.
-public define measure_in(doc: SemanticDocument, theme: Theme, face: Font, node_id: int, avail_w: int) -> Size2:
+public define measure_in(doc: SemanticDocument, theme: Theme, face: Font, node_id: number, avail_w: number) -> Size2:
     measure_deep(doc, theme, face, node_id, avail_w, [], [], [])
 
 # The same measurement, but able to read sizes already worked out for the
 # children. `done`/`wraps` empty means there are none and everything below
 # is measured for real - which is what a re-measure against a new width
 # has to do anyway.
-define measure_deep(doc: SemanticDocument, theme: Theme, face: Font, node_id: int, avail_w: int, done: [Size2], wraps: [int], styles: [StyleRule]) -> Size2:
+define measure_deep(doc: SemanticDocument, theme: Theme, face: Font, node_id: number, avail_w: number, done: [Size2], wraps: [number], styles: [StyleRule]) -> Size2:
     if node_shown(doc.nodes[node_id]):
         measure_shown(doc, theme, face, node_id, avail_w, done, wraps, styles)
     else:
@@ -526,12 +533,12 @@ define measure_deep(doc: SemanticDocument, theme: Theme, face: Font, node_id: in
 # A child's size: the one already worked out, unless nothing below it has
 # been done yet, or its subtree wraps and so has no size until it is told
 # a width.
-define kid_size(doc: SemanticDocument, theme: Theme, face: Font, k: int, avail_w: int, done: [Size2], wraps: [int], styles: [StyleRule]) -> Size2:
+define kid_size(doc: SemanticDocument, theme: Theme, face: Font, k: number, avail_w: number, done: [Size2], wraps: [number], styles: [StyleRule]) -> Size2:
     if length(done) is 0 or wraps[k] is 1:
         return measure_deep(doc, theme, face, k, avail_w, done, wraps, styles)
     done[k]
 
-define measure_shown(doc: SemanticDocument, theme: Theme, face: Font, node_id: int, avail_w: int, done: [Size2], wraps: [int], styles: [StyleRule]) -> Size2:
+define measure_shown(doc: SemanticDocument, theme: Theme, face: Font, node_id: number, avail_w: number, done: [Size2], wraps: [number], styles: [StyleRule]) -> Size2:
     node = doc.nodes[node_id]
     style = ready_style(theme, node, node_id, styles)
     # Read ONCE for this node and carried into every length below. It used
@@ -638,7 +645,7 @@ define measure_shown(doc: SemanticDocument, theme: Theme, face: Font, node_id: i
 
 # Children in `order:` order (default 0, stable on ties). Selection sort - child
 # counts are small.
-define child_order(doc: SemanticDocument, node: Node) -> [int]:
+define child_order(doc: SemanticDocument, node: Node) -> [number]:
     ids = node.children
     n = length(ids)
     # Almost nothing uses `order`, and the sort below is a selection sort
@@ -688,9 +695,9 @@ define child_order(doc: SemanticDocument, node: Node) -> [int]:
 # are unchanged AND whose size came out the same. Placing can then skip it
 # whole: nothing below it can have moved. It is empty from a cold measure,
 # because a frame told from nothing knows of no "before".
-public type Sizes: box: [Size2], wraps: [int], styles: [StyleRule], same: [int]
+public type Sizes: box: [Size2], wraps: [number], styles: [StyleRule], same: [number]
 
-define wraps_below(doc: SemanticDocument, node_id: int, out: [int]) -> truth:
+define wraps_below(doc: SemanticDocument, node_id: number, out: [number]) -> truth:
     node = doc.nodes[node_id]
     # A flow has no height until it is told a width, exactly like a
     # paragraph. Measured without one it reported a single line, and then
@@ -748,10 +755,10 @@ define travelling(kid: Node, cs: Size2) -> Size2:
     who = node_name(kid)
     Size2{w: smooth("{who}|w", cs.w), h: smooth("{who}|h", cs.h)}
 
-define with_main(cs: Size2, row: truth, main: int) -> Size2:
+define with_main(cs: Size2, row: truth, main: number) -> Size2:
     if row then Size2{w: main, h: cs.h} else Size2{w: cs.w, h: main}
 
-define sized(doc: SemanticDocument, theme: Theme, face: Font, sizes: Sizes, k: int, avail_w: int) -> Size2:
+define sized(doc: SemanticDocument, theme: Theme, face: Font, sizes: Sizes, k: number, avail_w: number) -> Size2:
     if sizes.wraps[k] is 1:
         # With the sizes handed along, only the chain down to the text that
         # actually breaks is walked again; everything beside it is already
@@ -768,7 +775,7 @@ define sized(doc: SemanticDocument, theme: Theme, face: Font, sizes: Sizes, k: i
 # `order` reorders. The full flex vocabulary Atlas's layout_container has, on the
 # shared ori_display seam. (measure() is re-walked per child - fine for UI-sized
 # trees; memoize if it ever matters.)
-define place_nodes(doc: SemanticDocument, theme: Theme, face: Font, node_id: int, x: int, y: int, w: int, h: int, measured: [Measured]) -> [Measured]:
+define place_nodes(doc: SemanticDocument, theme: Theme, face: Font, node_id: number, x: number, y: number, w: number, h: number, measured: [Measured]) -> [Measured]:
     place_sized(doc, theme, face, node_id, x, y, w, h, measured, measure_all(doc, theme, face))
 
 # --- placed against something, not in the line ------------------------------
@@ -832,7 +839,7 @@ define float_spot(doc: SemanticDocument, acc: [Measured], kid: Node, size: Size2
 
 # Place a child, trimmed to the box it goes in. `keeps` is false for a box
 # that clips, where a child hanging outside is exactly what scrolling is.
-define held(doc: SemanticDocument, theme: Theme, face: Font, k: int, x0: int, y0: int, w0: int, h0: int, acc: [Measured], sizes: Sizes, keeps: truth, ix: int, iy: int, iw: int, ih: int) -> [Measured]:
+define held(doc: SemanticDocument, theme: Theme, face: Font, k: number, x0: number, y0: number, w0: number, h0: number, acc: [Measured], sizes: Sizes, keeps: truth, ix: number, iy: number, iw: number, ih: number) -> [Measured]:
     at_scale = scale_now()
     # The margin was counted into the size the line was flowed with, so it
     # comes back off here: the box a thing actually gets is its own, and
@@ -852,7 +859,7 @@ define held(doc: SemanticDocument, theme: Theme, face: Font, k: int, x0: int, y0
     nh = if low > ny then low - ny else 0
     place_sized(doc, theme, face, k, nx, ny, nw, nh, acc, sizes)
 
-define place_sized(doc: SemanticDocument, theme: Theme, face: Font, node_id: int, x: int, y: int, w: int, h: int, measured: [Measured], sizes: Sizes) -> [Measured]:
+define place_sized(doc: SemanticDocument, theme: Theme, face: Font, node_id: number, x: number, y: number, w: number, h: number, measured: [Measured], sizes: Sizes) -> [Measured]:
     # A subtree that is what it was, asked for the box it already had, is
     # already placed - `measured` came in holding the last frame's rects.
     # Nothing below it can have moved, so nothing below it is worked out
@@ -1125,12 +1132,12 @@ public define place_from(doc: SemanticDocument, theme: Theme, face: Font, sizes:
 # What this is NOT: a diff of the display list, or a tree the app mutates.
 # The app still builds the whole document every frame, in one line, the way
 # it always did. The comparing is the framework's business.
-public type Frame: doc: SemanticDocument, sizes: Sizes, placed: [Measured], list: DisplayList, room: Rect, from_cmd: [int], to_cmd: [int], dress: Theme
+public type Frame: doc: SemanticDocument, sizes: Sizes, placed: [Measured], list: DisplayList, room: Rect, from_cmd: [number], to_cmd: [number], dress: Theme
 
 # What a paint produced, and where each subtree's part of it starts and ends.
 # The spans are what lets the next frame COPY a branch that did not change
 # instead of working it out again.
-public type Painted: list: DisplayList, from_cmd: [int], to_cmd: [int]
+public type Painted: list: DisplayList, from_cmd: [number], to_cmd: [number]
 
 # Are these the same node, said the same way? Role, properties in order, and
 # the same children. Five short comparisons for a node that did not change -
@@ -1249,7 +1256,7 @@ define slides(node: Node) -> truth:
 # it is the whole reason this is safe. Scrolling changes no size and no
 # property the eye would call layout, and it moves everything - a rule that
 # tried to name the properties that matter would have missed it, and did.
-define steady_below(doc: SemanticDocument, was: SemanticDocument, now: [Measured], before: [Measured]) -> [int]:
+define steady_below(doc: SemanticDocument, was: SemanticDocument, now: [Measured], before: [Measured]) -> [number]:
     n = length(doc.nodes)
     edit out = []
     loop i in 0 until n:
@@ -1357,7 +1364,7 @@ define kept(name: text) -> text:
         put = slot_set(k, "{name}")
     slot_get(k)
 
-public define pick_placed(doc: SemanticDocument, theme: Theme, placed: [Measured], x: int, y: int) -> text:
+public define pick_placed(doc: SemanticDocument, theme: Theme, placed: [Measured], x: number, y: number) -> text:
     if length(doc.nodes) is 0:
         return ""
     edit layer = highest_layer(doc)
@@ -1381,7 +1388,7 @@ public define pick_placed(doc: SemanticDocument, theme: Theme, placed: [Measured
 # whose centre lies that way wins, with sideways drift counted double -
 # a control straight ahead beats a nearer one off to the side, which is
 # what a thumb on a stick expects.
-public define near_toward(doc: SemanticDocument, placed: [Measured], from: text, dx: int, dy: int) -> text:
+public define near_toward(doc: SemanticDocument, placed: [Measured], from: text, dx: number, dy: number) -> text:
     here = rect_of(doc, placed, from)
     fx = here.x + here.wide / 2.0
     fy = here.y + here.high / 2.0
@@ -1418,9 +1425,9 @@ define abs_real(v: number) -> number:
 # known height, and the offset says how far down you are. It lives here
 # because getting it wrong by one row is the kind of mistake every app
 # would otherwise make on its own.
-public type Window: first: int, count: int, above: int, below: int
+public type Window: first: number, count: number, above: number, below: number
 
-public define row_window(total: int, row_high: int, box_high: int, away: int) -> Window:
+public define row_window(total: number, row_high: number, box_high: number, away: number) -> Window:
     if row_high <= 0 or total <= 0:
         return Window{first: 0, count: 0, above: 0, below: 0}
     top = if away < 0 then 0 else away
@@ -1456,7 +1463,7 @@ public define with_boxes(doc: SemanticDocument, theme: Theme, face: Font, placed
 # million pixels tall and drew a line straight across the window. What is
 # clipped on screen has to be clipped here or the tool lies about the
 # thing it exists to show.
-define boxes_in(doc: SemanticDocument, placed: [Measured], node_id: int, into: DisplayList, room: Rect) -> DisplayList:
+define boxes_in(doc: SemanticDocument, placed: [Measured], node_id: number, into: DisplayList, room: Rect) -> DisplayList:
     node = doc.nodes[node_id]
     edit out = into
     if node_shown(node):
@@ -1483,7 +1490,7 @@ define seen_part(r: Rect, room: Rect) -> Rect:
 # The one box under a point, said in words: what it is, what it answers to,
 # and how big it came out. What you actually want when you are staring at
 # something that is the wrong size.
-public define box_told(doc: SemanticDocument, placed: [Measured], node_id: int) -> text:
+public define box_told(doc: SemanticDocument, placed: [Measured], node_id: number) -> text:
     if node_id < 0 or node_id >= length(placed):
         return ""
     node = doc.nodes[node_id]
@@ -1575,7 +1582,7 @@ public define resolve(doc: SemanticDocument, theme: Theme, face: Font) -> Displa
 # This is only done when the document has ONE layer. Raised things are
 # painted in a pass of their own, so a node's commands are not one run of
 # the list and there is nothing to copy.
-define paint_told(doc: SemanticDocument, theme: Theme, face: Font, measured: [Measured], before: Frame, steady: [int]) -> Painted:
+define paint_told(doc: SemanticDocument, theme: Theme, face: Font, measured: [Measured], before: Frame, steady: [number]) -> Painted:
     if length(doc.nodes) is 0:
         return Painted{list: empty_list(), from_cmd: [], to_cmd: []}
     n = length(doc.nodes)
@@ -1588,7 +1595,7 @@ define paint_told(doc: SemanticDocument, theme: Theme, face: Font, measured: [Me
 
 # The same walk `paint_within` does, carrying the spans - and turning back
 # at the top of any branch it can copy whole.
-define told_within(doc: SemanticDocument, theme: Theme, face: Font, measured: [Measured], node_id: int, into: DisplayList, want: int, inherited: int, dim: int, room: Rect, room_rad: int, whose: text, before: Frame, steady: [int], starts: [int], ends: [int]) -> Painted:
+define told_within(doc: SemanticDocument, theme: Theme, face: Font, measured: [Measured], node_id: number, into: DisplayList, want: number, inherited: number, dim: number, room: Rect, room_rad: number, whose: text, before: Frame, steady: [number], starts: [number], ends: [number]) -> Painted:
     node = doc.nodes[node_id]
     began = length(into.commands)
     if steady[node_id] is 1 and node_id < length(before.from_cmd):
@@ -1635,7 +1642,7 @@ define told_within(doc: SemanticDocument, theme: Theme, face: Font, measured: [M
 
 # A copied branch's children kept their order and their contents; only where
 # they sit in the list moved. Said once here rather than re-derived.
-define slid_spans(doc: SemanticDocument, node_id: int, before: Frame, starts: [int], ends: [int], moved_by: int) -> Painted:
+define slid_spans(doc: SemanticDocument, node_id: number, before: Frame, starts: [number], ends: [number], moved_by: number) -> Painted:
     edit from_out = starts
     edit to_out = ends
     loop k in doc.nodes[node_id].children:
@@ -1673,7 +1680,7 @@ define paint(doc: SemanticDocument, theme: Theme, face: Font, measured: [Measure
         layer = layer + 1
     list
 
-define highest_layer(doc: SemanticDocument) -> int:
+define highest_layer(doc: SemanticDocument) -> number:
     edit high = 0
     loop node in doc.nodes:
         l = node_layer(node)
@@ -1683,14 +1690,14 @@ define highest_layer(doc: SemanticDocument) -> int:
 
 # Paint the nodes belonging to `want`. A node inherits its parent's layer
 # unless it names a higher one, so a dialog lifts everything inside it.
-define paint_layer(doc: SemanticDocument, theme: Theme, face: Font, measured: [Measured], node_id: int, into: DisplayList, want: int, inherited: int) -> DisplayList:
+define paint_layer(doc: SemanticDocument, theme: Theme, face: Font, measured: [Measured], node_id: number, into: DisplayList, want: number, inherited: number) -> DisplayList:
     paint_faded(doc, theme, face, measured, node_id, into, want, inherited, 100)
 
 # `fade: 0..100` on a node dims EVERYTHING it draws, and everything its
 # children draw. Fading a panel by fading each colour in it one at a time
 # is not the same thing: the shadows, the borders and the text have to go
 # together or the panel comes apart on its way out.
-define paint_faded(doc: SemanticDocument, theme: Theme, face: Font, measured: [Measured], node_id: int, into: DisplayList, want: int, inherited: int, dim: int) -> DisplayList:
+define paint_faded(doc: SemanticDocument, theme: Theme, face: Font, measured: [Measured], node_id: number, into: DisplayList, want: number, inherited: number, dim: number) -> DisplayList:
     paint_within(doc, theme, face, measured, node_id, into, want, inherited, dim, no_clip(), 0, "")
 
 # A clipping box, when it is done, has to give back the clip it was
@@ -1698,7 +1705,7 @@ define paint_faded(doc: SemanticDocument, theme: Theme, face: Font, measured: [M
 # after it escape: scroll a page whose panels clip and the whole page
 # drew itself over the header, because the first panel to finish had
 # switched the page's own clip off on its way out.
-define paint_within(doc: SemanticDocument, theme: Theme, face: Font, measured: [Measured], node_id: int, into: DisplayList, want: int, inherited: int, dim: int, room: Rect, room_rad: int, whose: text) -> DisplayList:
+define paint_within(doc: SemanticDocument, theme: Theme, face: Font, measured: [Measured], node_id: number, into: DisplayList, want: number, inherited: number, dim: number, room: Rect, room_rad: number, whose: text) -> DisplayList:
     node = doc.nodes[node_id]
     # Motion is INHERITED, the way the clip is. A button carries a name
     # and its label does not, so the plate used to travel while the words
@@ -1739,7 +1746,7 @@ define paint_within(doc: SemanticDocument, theme: Theme, face: Font, measured: [
 # The track and its thumb. The thumb is as tall a share of the track as
 # the box is of the content, and sits as far down it as you have scrolled -
 # which is the whole language of a scrollbar in one sentence.
-define add_bar_for(doc: SemanticDocument, theme: Theme, measured: [Measured], node_id: int, into: DisplayList) -> DisplayList:
+define add_bar_for(doc: SemanticDocument, theme: Theme, measured: [Measured], node_id: number, into: DisplayList) -> DisplayList:
     node = doc.nodes[node_id]
     box = measured[node_id].rect
     reach = content_below(doc, measured, node_id, box)
@@ -1772,7 +1779,7 @@ define bar_track(style: StyleRule) -> text:
 define bar_thumb(style: StyleRule) -> text:
     if style.fg_colour is not "" then style.fg_colour else "#6a6a6aff"
 
-define paint_from(doc: SemanticDocument, theme: Theme, face: Font, measured: [Measured], node_id: int, into: DisplayList) -> DisplayList:
+define paint_from(doc: SemanticDocument, theme: Theme, face: Font, measured: [Measured], node_id: number, into: DisplayList) -> DisplayList:
     node = doc.nodes[node_id]
     edit list = paint_one(doc, theme, face, measured, node_id, into, 100, node_name(doc.nodes[node_id]))
     clipping = node_clips(node)
@@ -1819,7 +1826,7 @@ define no_clip() -> Rect:
 
 # A colour at a fraction of its own alpha. 100 leaves it exactly alone,
 # which is the case for almost every node, so it costs nothing to ask.
-define faded(colour: text, dim: int) -> text:
+define faded(colour: text, dim: number) -> text:
     if dim >= 100 or colour is "":
         return colour
     v = packed(colour)
@@ -1827,7 +1834,7 @@ define faded(colour: text, dim: int) -> text:
         return colour
     unpacked(v // 256 * 256 + v % 256 * dim // 100)
 
-define paint_one(doc: SemanticDocument, theme: Theme, face: Font, measured: [Measured], i: int, into: DisplayList, dim: int, whose: text) -> DisplayList:
+define paint_one(doc: SemanticDocument, theme: Theme, face: Font, measured: [Measured], i: number, into: DisplayList, dim: number, whose: text) -> DisplayList:
     at_scale = scale_now()
     edit list = into
     node = doc.nodes[i]
@@ -1942,7 +1949,7 @@ define paint_one(doc: SemanticDocument, theme: Theme, face: Font, measured: [Mea
 # node happened to sit in storage: a document that lists its root last had
 # the root, which covers the whole window, win every point. Nothing was
 # clickable and nothing lit up, because every pointer got the root back.
-define pick_walk(doc: SemanticDocument, theme: Theme, measured: [Measured], node_id: int, x: int, y: int, so_far: text) -> text:
+define pick_walk(doc: SemanticDocument, theme: Theme, measured: [Measured], node_id: number, x: number, y: number, so_far: text) -> text:
     node = doc.nodes[node_id]
     edit best = so_far
     if rect_contains(measured[node_id].rect, Point{x: x, y: y}):
@@ -1977,7 +1984,7 @@ define pick_walk(doc: SemanticDocument, theme: Theme, measured: [Measured], node
 # `caret: <byte>` says where the caret is, `anchor: <byte>` the other end
 # of the selection. Both are byte offsets into the node's own text, which
 # is what veil_edit hands out.
-define push_marks(list: DisplayList, lines: [text], r: Rect, pad: int, size: int, face: Font, node: Node, src: int, lit: truth) -> DisplayList:
+define push_marks(list: DisplayList, lines: [text], r: Rect, pad: number, size: number, face: Font, node: Node, src: number, lit: truth) -> DisplayList:
     at_c = prop_int(node, "caret", 0 - 1)
     if at_c < 0:
         return list
@@ -1995,8 +2002,8 @@ define push_marks(list: DisplayList, lines: [text], r: Rect, pad: int, size: int
         lo = if from - seen < 0 then 0 else if from - seen > len_of then len_of else from - seen
         hi = if to - seen < 0 then 0 else if to - seen > len_of then len_of else to - seen
         if hi > lo:
-            x0 = to_real(text_size(text_of(bytes_part(b, 0, lo)), size, face).wide)
-            x1 = to_real(text_size(text_of(bytes_part(b, 0, hi)), size, face).wide)
+            x0 = to_real(text_size(text_of(bytes_part(b, 0, to_whole(lo))), size, face).wide)
+            x1 = to_real(text_size(text_of(bytes_part(b, 0, to_whole(hi))), size, face).wide)
             plate = Rect{x: r.x + to_real(pad) + x0, y: r.y + to_real(pad + n * lh), wide: x1 - x0, high: to_real(lh)}
             out = push_cmd(out, DrawRect(plate, "#2f5aa8ff", src))
         seen = seen + len_of + 1
@@ -2012,7 +2019,7 @@ define push_marks(list: DisplayList, lines: [text], r: Rect, pad: int, size: int
 # One line drawn as its coloured pieces, each starting where the last one
 # ended. The pieces are measured with the same engine that draws them, so
 # a colour change costs nothing in position.
-define push_runs(list: DisplayList, runs: [text], x0: number, y: number, ink: text, size: int, face: Font, src: int) -> DisplayList:
+define push_runs(list: DisplayList, runs: [text], x0: number, y: number, ink: text, size: number, face: Font, src: number) -> DisplayList:
     edit out = list
     edit x = x0
     edit i = 0
@@ -2026,7 +2033,7 @@ define push_runs(list: DisplayList, runs: [text], x0: number, y: number, ink: te
         i = i + 2
     out
 
-define push_lines(list: DisplayList, lines: [text], r: Rect, pad: int, size: int, ink: text, face: Font, node: Node, src: int) -> DisplayList:
+define push_lines(list: DisplayList, lines: [text], r: Rect, pad: number, size: number, ink: text, face: Font, node: Node, src: number) -> DisplayList:
     lh = line_high(size, face)
     block = length(lines) * lh
     lone = length(node.children) is 0
@@ -2085,7 +2092,7 @@ define push_lines(list: DisplayList, lines: [text], r: Rect, pad: int, size: int
 # under a button still blocks the world); "" when the UI is air there -
 # scaffolding panels with no paint and no words claim nothing, so the
 # game underneath keeps its clicks.
-public define pick_spoken(doc: SemanticDocument, theme: Theme, face: Font, box: Rect, x: int, y: int) -> text:
+public define pick_spoken(doc: SemanticDocument, theme: Theme, face: Font, box: Rect, x: number, y: number) -> text:
     if length(doc.nodes) is 0:
         return ""
     placed = layout_in(doc, theme, face, box)
@@ -2100,7 +2107,7 @@ public define pick_spoken(doc: SemanticDocument, theme: Theme, face: Font, box: 
         layer = layer - 1
     kept(spoken)
 
-define pick_layer(doc: SemanticDocument, theme: Theme, measured: [Measured], node_id: int, x: int, y: int, so_far: text, want: int, inherited: int) -> text:
+define pick_layer(doc: SemanticDocument, theme: Theme, measured: [Measured], node_id: number, x: number, y: number, so_far: text, want: number, inherited: number) -> text:
     node = doc.nodes[node_id]
     # `pass: 1` - painted, but the pointer goes straight through it, and
     # through everything inside it. The thing under your hand while you
@@ -2128,7 +2135,7 @@ define pick_layer(doc: SemanticDocument, theme: Theme, measured: [Measured], nod
     best
 
 # Hit-test against the host-box layout (see layout_in). -1 = miss.
-define pick_id_walk(doc: SemanticDocument, measured: [Measured], node_id: int, x: int, y: int, so_far: int) -> int:
+define pick_id_walk(doc: SemanticDocument, measured: [Measured], node_id: number, x: number, y: number, so_far: number) -> number:
     edit best = so_far
     if rect_contains(measured[node_id].rect, Point{x: x, y: y}):
         best = node_id
@@ -2137,7 +2144,7 @@ define pick_id_walk(doc: SemanticDocument, measured: [Measured], node_id: int, x
             best = pick_id_walk(doc, measured, k, x, y, best)
     best
 
-public define pick_node_in(doc: SemanticDocument, theme: Theme, face: Font, box: Rect, x: int, y: int) -> int:
+public define pick_node_in(doc: SemanticDocument, theme: Theme, face: Font, box: Rect, x: number, y: number) -> number:
     if length(doc.nodes) is 0:
         0 - 1
     else:
@@ -2145,7 +2152,7 @@ public define pick_node_in(doc: SemanticDocument, theme: Theme, face: Font, box:
 
 # Hit-test against the same layout the renderer drew. -1 = miss.
 # Last match wins so later (overlapping) nodes sit "on top".
-public define pick_node(doc: SemanticDocument, theme: Theme, face: Font, x: int, y: int) -> int:
+public define pick_node(doc: SemanticDocument, theme: Theme, face: Font, x: number, y: number) -> number:
     if length(doc.nodes) is 0:
         0 - 1
     else:

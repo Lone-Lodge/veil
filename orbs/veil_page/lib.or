@@ -16,9 +16,6 @@
 # millisecond off, so it was never the drawing. So they are gone, and what
 # is left is the block below.
 
-use ori_geometry
-use ori_display
-use veil_motion
 
 # --- the whole frame, as numbers --------------------------------------------
 #
@@ -35,6 +32,14 @@ use veil_motion
 # Twelve wide and fixed is not tidiness: it is one instance of a GPU draw
 # call. The page's card renderer reads this block straight into instances
 # and draws the screen with one.
+
+use ori_geometry
+use ori_display
+use veil_motion
+use veil_resolver
+use text
+use list
+
 external define page_frame(cmds: [int], count: int, words: [int]) -> int
 
 # kind: 1 rect  2 shadow  3 clip  4 text  5 icon  6 arc  7 path  8 image
@@ -45,7 +50,7 @@ external define page_frame(cmds: [int], count: int, words: [int]) -> int
 #
 # A colour of -1 means "the letters at 11 say it" - a gradient. -2 means do
 # not paint at all, and the page never has to look.
-public define pack_page(list: DisplayList) -> int:
+public define pack_page(list: DisplayList) -> number:
     n = length(list.commands)
     if n is 0:
         return 0
@@ -60,13 +65,13 @@ public define pack_page(list: DisplayList) -> int:
 
 # How many letters the whole frame carries, counted before anything is
 # written so both blocks can be made once and written in place.
-define word_room(list: DisplayList) -> int:
+define word_room(list: DisplayList) -> number:
     edit room = 0
     loop cmd in list.commands:
         room = room + words_of(cmd)
     room
 
-define words_of(cmd: DrawCmd) -> int:
+define words_of(cmd: DrawCmd) -> number:
     choose cmd:
         DrawRect(r, colour, src) then say_room(colour)
         DrawRoundRect(r, colour, corners, src) then say_room(colour)
@@ -81,15 +86,15 @@ define words_of(cmd: DrawCmd) -> int:
         DrawSprite(p, path, scale, src) then room_for(path)
 
 # A colour only needs letters when it is not a plain `#rrggbbaa`.
-define say_room(colour: text) -> int:
+define say_room(colour: text) -> number:
     if packed(colour) < 0 and length(colour) > 1 then room_for(colour) else 0
 
-define room_for(t: text) -> int:
+define room_for(t: text) -> number:
     bytes_count(bytes_of(t)) + 1
 
 # One command. Answers where its letters ended, so the next one knows where
 # to start.
-define pack_one(cmds: [int], words: [int], at: int, wat: int, cmd: DrawCmd) -> int:
+define pack_one(cmds: [number], words: [number], at: number, wat: number, cmd: DrawCmd) -> number:
     choose cmd:
         DrawRect(r, colour, src) then box_out(cmds, words, at, wat, 1, r, colour, 0, 0, 0, 0)
         DrawRoundRect(r, colour, corners, src) then round_out(cmds, words, at, wat, r, colour, corners)
@@ -106,7 +111,7 @@ define pack_one(cmds: [int], words: [int], at: int, wat: int, cmd: DrawCmd) -> i
 define no_point() -> Point:
     Point{x: 0.0, y: 0.0}
 
-define box_out(cmds: [int], words: [int], at: int, wat: int, kind: int, r: Rect, colour: text, a: int, b: int, c: int, d: int) -> int:
+define box_out(cmds: [number], words: [number], at: number, wat: number, kind: number, r: Rect, colour: text, a: number, b: number, c: number, d: number) -> number:
     edit out = cmds
     out = set(out, at, kind)
     out = set(out, at + 1, to_whole(r.x))
@@ -120,7 +125,7 @@ define box_out(cmds: [int], words: [int], at: int, wat: int, kind: int, r: Rect,
     out = set(out, at + 10, 0 - 1)
     ink_out(cmds, words, at, wat, colour)
 
-define round_out(cmds: [int], words: [int], at: int, wat: int, r: Rect, colour: text, corners: text) -> int:
+define round_out(cmds: [number], words: [number], at: number, wat: number, r: Rect, colour: text, corners: text) -> number:
     four = split(corners, " ")
     one = number_in(corners)
     tl = if length(four) >= 4 then number_in(four[0]) else one
@@ -134,7 +139,7 @@ define round_out(cmds: [int], words: [int], at: int, wat: int, r: Rect, colour: 
 # has to read the letters again. The name is what the slot store already
 # hashes text with, and the length sits at the front of the word block, so
 # a reader that checks both cannot serve one line's letters for another's.
-define say_out(cmds: [int], words: [int], at: int, wat: int, kind: int, p: Point, content: text, colour: text, size: int) -> int:
+define say_out(cmds: [number], words: [number], at: number, wat: number, kind: number, p: Point, content: text, colour: text, size: number) -> number:
     edit out = cmds
     out = set(out, at, kind)
     out = set(out, at + 1, to_whole(p.x))
@@ -145,7 +150,7 @@ define say_out(cmds: [int], words: [int], at: int, wat: int, kind: int, p: Point
     after = letters_out(cmds, words, at, 10, wat, content)
     ink_out(cmds, words, at, after, colour)
 
-define arc_out(cmds: [int], words: [int], at: int, wat: int, mid: Point, outer: int, thick: int, from_deg: int, to_deg: int, colour: text) -> int:
+define arc_out(cmds: [number], words: [number], at: number, wat: number, mid: Point, outer: number, thick: number, from_deg: number, to_deg: number, colour: text) -> number:
     edit out = cmds
     out = set(out, at, 6)
     out = set(out, at + 1, to_whole(mid.x))
@@ -157,7 +162,7 @@ define arc_out(cmds: [int], words: [int], at: int, wat: int, mid: Point, outer: 
     out = set(out, at + 10, 0 - 1)
     ink_out(cmds, words, at, wat, colour)
 
-define art_out(cmds: [int], words: [int], at: int, wat: int, kind: int, x: number, y: number, w: number, h: number, path: text, extra: int) -> int:
+define art_out(cmds: [number], words: [number], at: number, wat: number, kind: number, x: number, y: number, w: number, h: number, path: text, extra: number) -> number:
     edit out = cmds
     out = set(out, at, kind)
     out = set(out, at + 1, to_whole(x))
@@ -170,7 +175,7 @@ define art_out(cmds: [int], words: [int], at: int, wat: int, kind: int, x: numbe
     letters_out(cmds, words, at, 10, wat, path)
 
 # A colour goes in as a number when it can, and as letters when it cannot.
-define ink_out(cmds: [int], words: [int], at: int, wat: int, colour: text) -> int:
+define ink_out(cmds: [number], words: [number], at: number, wat: number, colour: text) -> number:
     edit out = cmds
     if length(colour) < 2:
         out = set(out, at + 5, 0 - 2)
@@ -184,7 +189,7 @@ define ink_out(cmds: [int], words: [int], at: int, wat: int, colour: text) -> in
     letters_out(cmds, words, at, 11, wat, colour)
 
 # Letters into the word block, and where they start into the command.
-define letters_out(cmds: [int], words: [int], at: int, slot: int, wat: int, t: text) -> int:
+define letters_out(cmds: [number], words: [number], at: number, slot: number, wat: number, t: text) -> number:
     edit out = cmds
     b = bytes_of(t)
     n = bytes_count(b)
