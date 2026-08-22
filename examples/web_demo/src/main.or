@@ -146,9 +146,13 @@ define tab_wanted(name: text) -> number:
 # Keeping it open needs Content-Length: without it the only way a browser
 # can know the body ended is the connection closing, which is exactly the
 # thing being avoided.
+# Access-Control-Allow-Origin: en editor som ager sin egen duk bor pa en
+# ANNAN origin an spelet (dots pa 7374, spelet nagon annanstans). Utan
+# huvudet ser den inte en enda ram. Det ar inget demon hittar pa - det ar
+# ett krav pa varje bildserver som nagon annan an dess egen sida ska rita.
 define reply(conn: number, kind: text, body: text):
     size = bytes_count(bytes_of(body))
-    tcp_send(conn, "HTTP/1.1 200 OK\r\nContent-Type: {kind}\r\nContent-Length: {size}\r\nCache-Control: no-store\r\nConnection: keep-alive\r\n\r\n" + body)
+    tcp_send(conn, "HTTP/1.1 200 OK\r\nContent-Type: {kind}\r\nContent-Length: {size}\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\nConnection: keep-alive\r\n\r\n" + body)
 
 define main() -> number:
     face = font_body()

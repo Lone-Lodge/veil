@@ -377,22 +377,33 @@ function glFrame(cmdsPtr, count, wordsPtr) {
     // Four numbers out of one, the way the shader wants them. A gradient
     // still crosses as letters and shows its first stop until the shader
     // learns a second one.
-    let r = 0, gr = 0, b = 0, a = 1, slide = null;
+    let r = 0, gr = 0, b = 0, a = 1, slideSaid = null;
     if (colour >= 0) {
       r = ((colour >>> 24) & 255) * F; gr = ((colour >>> 16) & 255) * F;
       b = ((colour >>> 8) & 255) * F;  a = (colour & 255) * F;
     } else if (kind !== 3) {
       const said = wordFrom(wordNum, num(at + 11));
-      const stops = said.startsWith('grad:') ? said.split(':') : null;
-      const first = hexInk(stops ? stops[1] : said);
+      if (said.startsWith('grad:')) slideSaid = said;
+      const first = hexInk(slideSaid ? said.split(':').filter(p => p !== 'grad' && p !== 'across')[0] : said);
       r = first[0]; gr = first[1]; b = first[2]; a = first[3];
-      if (stops) slide = hexInk(stops[2]);
     }
 
     if (kind === 1) {
-      // A slide of colour is the same box with its far end riding along.
-      if (slide) g.put(x, y, w, h, num(at + 6), num(at + 7), num(at + 8), num(at + 9),
-                       r, gr, b, a, 3, 0, 0, slide[0], slide[1], slide[2], slide[3]);
+      // A slide of colour is a strip baked onto the picture sheet and then
+      // drawn as a picture - which is how it gets as many stops as it likes
+      // and a direction, without the shader knowing gradients exist.
+      const strip = slideSaid ? g.slideFor(slideSaid) : null;
+      if (strip) {
+        const sz = g.artSize();
+        // Down the middle of the strip's narrow side, so a linear sample
+        // never reaches into whatever is packed beside it.
+        const flat = strip.w === 1;
+        const u0 = flat ? (strip.x + 0.5) / sz : strip.x / sz;
+        const u1 = flat ? (strip.x + 0.5) / sz : (strip.x + strip.w) / sz;
+        const v0 = flat ? strip.y / sz : (strip.y + 0.5) / sz;
+        const v1 = flat ? (strip.y + strip.h) / sz : (strip.y + 0.5) / sz;
+        g.put(x, y, w, h, num(at + 6), num(at + 7), num(at + 8), num(at + 9), 1, 1, 1, 1, 4, 0, 0, u0, v0, u1, v1);
+      }
       else g.put(x, y, w, h, num(at + 6), num(at + 7), num(at + 8), num(at + 9), r, gr, b, a, 0, 0, 0, 0, 0, 0, 0);
     } else if (kind === 2) {
       const rad = num(at + 6);
@@ -919,6 +930,10 @@ function beat() {
   } else {
     while (waiting.length) { const e = waiting.shift(); tell(e[0], e[1], e[2], e[3], e[4]); }
   }
+  // The screen said out loud, at the same four-times-a-second the status
+  // line uses: a reader does not need sixty, and being handed a new tree
+  // sixty times a second is how a reader is made useless.
+  saySreen();
   // Four times a second, not sixty. The number in it changes every frame,
   // so writing it every frame is a DOM parse and a page layout inside the
   // very frame it is reporting on - measuring the thing was part of what
@@ -964,6 +979,53 @@ cv.addEventListener('wheel', e => {
 // A key belongs to whatever the screen says is being typed into. Codes for
 // the ones that MOVE, a character for the rest - the split every editor makes.
 const KEYS = { Backspace: 8, Delete: 46, ArrowLeft: 37, ArrowRight: 39, ArrowUp: 38, ArrowDown: 40, Home: 36, End: 35, Enter: 13, Tab: 9, Escape: 27 };
+// --- the screen, said out loud ---------------------------------------------
+//
+// A canvas is a wall to a screen reader: it can be looked at and never read.
+// So the same screen exists a second time beside it as plain elements, out of
+// sight, and a reader reads those. veil hands over what is there and what
+// each thing is called - the same list the ring walks, because a reader and a
+// keyboard are the same person navigating the same screen.
+//
+// It is rebuilt only when it CHANGED. A screen reader that is handed a new
+// tree sixty times a second starts its sentence over sixty times a second,
+// which is worse than saying nothing.
+const spoken = document.createElement('div');
+spoken.setAttribute('role', 'application');
+spoken.setAttribute('aria-label', 'Veil-galleriet');
+spoken.style.cssText = 'position:fixed;left:-99999px;top:0;width:1px;height:1px;overflow:hidden;';
+document.body.appendChild(spoken);
+
+// veil's roles, in the words a browser knows. Anything else is a group,
+// which is honest: a reader says there is something there and reads its name.
+const ARIA = { btn: 'button', row: 'listitem', tab: 'tab', field: 'textbox', well: 'group',
+               panel: 'group', lead: 'text', label: 'text', check: 'checkbox', slide: 'slider' };
+let spokenWas = '';
+function saySreen() {
+  // The frame the page is already holding. Asking the module to build one
+  // per question is how this was first written and it ran out of memory in
+  // about a second.
+  if (!mod || !mod.spoken_all || !prev) return;
+  const lines = readText(mod.spoken_all(prev)).split('\n').filter(Boolean);
+  const focus = readText(mod.spoken_focus());
+  const now = focus + '\u0000' + lines.join('\n');
+  if (now === spokenWas) return;
+  spokenWas = now;
+  spoken.textContent = '';
+  for (const line of lines) {
+    const [name, role, says, state] = line.split('\t');
+    const el = document.createElement('div');
+    el.id = 'veil-' + name;
+    el.setAttribute('role', ARIA[role] || 'group');
+    el.textContent = says || name;
+    if (state === 'off') el.setAttribute('aria-disabled', 'true');
+    if (state === 'on') el.setAttribute('aria-checked', 'true');
+    if (name === focus) el.setAttribute('aria-current', 'true');
+    spoken.appendChild(el);
+  }
+  spoken.setAttribute('aria-activedescendant', focus ? 'veil-' + focus : '');
+}
+
 // --- text on its way in ----------------------------------------------------
 //
 // Typing Japanese means typing "nihon" and then picking which way to write

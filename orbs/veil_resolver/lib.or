@@ -228,7 +228,23 @@ define content_below(doc: SemanticDocument, measured: [Measured], node_id: numbe
     # rows long - the thumb would fill the whole track and scrolling would
     # stop at the twelfth row.
     if lists_lazily(node):
-        return rows_total(node) * row_height(node)
+        said = row_height(node)
+        # A grid stacks its rows, not its items: ten thousand slots four
+        # across is two thousand five hundred rows tall.
+        across = node_grid(node)
+        lines = if across > 1 then (rows_total(node) + across - 1) // across else rows_total(node)
+        if said > 0:
+            return lines * said
+        # Not said, so it is the average of the rows that are here.
+        edit tall = 0
+        edit many = 0
+        loop k in node.children:
+            if node_shown(doc.nodes[k]):
+                tall = tall + to_whole(measured[k].rect.high)
+                many = many + 1
+        if many is 0:
+            return 0
+        return lines * (tall // many)
     edit low = to_whole(box.y)
     loop k in node.children:
         if node_shown(doc.nodes[k]):
@@ -264,7 +280,7 @@ define row_height(node: Node) -> number:
     big(prop_int(node, "row_h", 0), scale_now())
 
 define lists_lazily(node: Node) -> truth:
-    rows_total(node) > 0 and row_height(node) > 0
+    rows_total(node) > 0
 
 define first_row(node: Node) -> number:
     prop_int(node, "from", 0)
@@ -910,16 +926,43 @@ define float_spot(doc: SemanticDocument, acc: [Measured], kid: Node, size: Size2
 
 # Place a child, trimmed to the box it goes in. `keeps` is false for a box
 # that clips, where a child hanging outside is exactly what scrolling is.
+# --- read the other way -----------------------------------------------------
+#
+# Arabic and Hebrew are not written right to left with a left-to-right screen
+# around them: the whole screen turns over. The back arrow points the other
+# way, the sidebar is on the right, the scrollbar is on the left, and a row of
+# buttons runs the other direction.
+#
+# `dir: rtl` on the ROOT says so, and every box in the flow is mirrored inside
+# its parent - which is one line in one place rather than a second version of
+# the flow, and it means `align: start` means the right without knowing it
+# does. Nesting takes care of itself: a child is mirrored in its parent and
+# then mirrors its own children in itself.
+#
+# What is NOT mirrored: anything placed at a point it named itself. `at_x`
+# is a screen coordinate, and a nameplate over a head does not move because
+# the menus turned around.
+#
+# What this is not is bidi. A screen is in one direction here; an Arabic
+# sentence with an English name in the middle of it needs the text engine to
+# reorder the run, and that is a different piece of work.
+define mirrored(doc: SemanticDocument) -> truth:
+    if length(doc.nodes) is 0:
+        return false
+    prop_val(doc.nodes[doc.root], "dir") is "rtl"
+
 define held(doc: SemanticDocument, theme: Theme, face: Font, k: number, x0: number, y0: number, w0: number, h0: number, acc: [Measured], sizes: Sizes, keeps: truth, ix: number, iy: number, iw: number, ih: number) -> [Measured]:
     at_scale = scale_now()
     # The margin was counted into the size the line was flowed with, so it
     # comes back off here: the box a thing actually gets is its own, and
     # the room it carries stays around it.
     edge = node_margin(doc.nodes[k], at_scale)
-    x = x0 + edge
     y = y0 + edge
     w = if w0 - edge * 2 > 0 then w0 - edge * 2 else 0
     h = if h0 - edge * 2 > 0 then h0 - edge * 2 else 0
+    # Turned over inside the box it was given, if the screen is.
+    straight = x0 + edge
+    x = if mirrored(doc) then ix + iw - (straight - ix) - w else straight
     if not keeps:
         return place_sized(doc, theme, face, k, x, y, w, h, acc, sizes)
     nx = if x < ix then ix else x
@@ -977,6 +1020,7 @@ define place_sized(doc: SemanticDocument, theme: Theme, face: Font, node_id: num
         # hundred nodes, which is most of a frame gone before anything is
         # drawn.
         edit kid_sizes = []
+        edit tall_sum = 0
         edit tallest = 0
         loop k in kids:
             raw = sized(doc, theme, face, sizes, k, cross_room)
@@ -995,6 +1039,12 @@ define place_sized(doc: SemanticDocument, theme: Theme, face: Font, node_id: num
             edge = node_margin(doc.nodes[k], at_scale) * 2
             cs = Size2{w: moved_in.w + edge, h: moved_in.h + edge}
             kid_sizes = append(kid_sizes, cs)
+            # Summed HERE rather than walked afterwards. Handing kid_sizes to
+            # a function to add up its heights marks it as possibly somebody
+            # else's, and an accumulator that might be somebody else's is
+            # copied whole on every append - 739 milliseconds for twenty
+            # thousand children instead of 13.
+            tall_sum = tall_sum + cs.h
             if node_shown(doc.nodes[k]) and cs.h > tallest:
                 tallest = cs.h
         edit content_main = 0
@@ -1049,7 +1099,16 @@ define place_sized(doc: SemanticDocument, theme: Theme, face: Font, node_id: num
         # The first row the app handed over is not the first row there is.
         # Its index says where it belongs, and everything below follows from
         # there - which is why no empty spacer has to stand in for the rest.
-        edit cursor = if lists_lazily(node) then main_start + first_row(node) * row_height(node) else main_start
+        # Where the first row handed over belongs: its index times how tall a
+        # row is - said outright, or the average of the ones in hand.
+        # How tall a row is when they are not all the same: the average of
+        # the ones in hand, summed while they were made. A chat log whose
+        # lines wrap differently cannot say a number in advance, and
+        # measuring all twenty-four thousand to find out would be the whole
+        # cost back again - so the length of the list is a guess that gets
+        # better as you go and is exact once you have been everywhere.
+        row_step = if row_height(node) > 0 then row_height(node) else (if length(kid_sizes) > 0 then tall_sum // length(kid_sizes) else 0)
+        edit cursor = if lists_lazily(node) then main_start + first_row(node) * row_step else main_start
         edit extra_gap = 0
         # A lazy list has room left over by definition - twelve rows in a box
         # that holds six - and justifying that space would put the twelve
@@ -1134,9 +1193,18 @@ define place_sized(doc: SemanticDocument, theme: Theme, face: Font, node_id: num
                     # not from where the cursor happens to have got to.
                     cell_w = (iw - gap * (cols - 1)) // cols
                     cell_h = tallest
-                    col_i = placed_n % cols
-                    row_i = placed_n // cols
-                    acc = held(doc, theme, face, k, ix + col_i * (cell_w + gap), iy + row_i * (cell_h + gap), cell_w, cell_h, acc, sizes, keeps, ix, iy, iw, ih)
+                    # In a lazy grid the item handed over is not the first
+                    # item there is: its own index says which cell it goes
+                    # in. A bag of ten thousand slots showing forty is forty
+                    # nodes, and the other nine thousand nine hundred and
+                    # sixty are a number.
+                    where = placed_n + if lists_lazily(node) then first_row(node) else 0
+                    col_i = where % cols
+                    row_i = where // cols
+                    # Shifted by the scroll, like everything else in a box
+                    # that scrolls. A grid never was, which nothing noticed
+                    # while grids were short enough to fit.
+                    acc = held(doc, theme, face, k, ix + col_i * (cell_w + gap) - shift_x, iy + row_i * (cell_h + gap) - shift_y, cell_w, cell_h, acc, sizes, keeps, ix, iy, iw, ih)
                     placed_n = placed_n + 1
                 else if stacked:
                     # A child that was GIVEN a size keeps it and is placed
@@ -1632,18 +1700,21 @@ public define reading_order(doc: SemanticDocument, placed: [Measured]) -> [text]
         node = doc.nodes[m.node_id]
         if node_do(node) is not "" and m.rect.wide > 0.0 and m.rect.high > 0.0 and levels[m.node_id] is top:
             rows = append(rows, m)
+    # "Already taken" is a MARK beside each row, not a list to scan. Scanning
+    # it turned a selection sort into a cubic one and, because the scan hands
+    # the list to itself, it also stopped the list growing where it stood - so
+    # every take copied it whole. Thirty controls never noticed; a screen with
+    # a thousand would have.
+    edit gone = []
+    loop _g in 0 until length(rows):
+        gone = append(gone, 0)
     edit out = []
-    edit taken = []
     loop _p in 0 until length(rows):
         edit best = 0 - 1
         edit best_key = 0
         edit i = 0
         loop m in rows:
-            edit already = false
-            loop t in taken:
-                if t is i:
-                    already = true
-            if not already:
+            if gone[i] is 0:
                 # A line is worth more than a column, and a line is eight
                 # pixels deep - two things side by side are on the same
                 # line even if one sits a hair lower.
@@ -1652,7 +1723,7 @@ public define reading_order(doc: SemanticDocument, placed: [Measured]) -> [text]
                     best = i
                     best_key = key
             i = i + 1
-        taken = append(taken, best)
+        gone = set(gone, best, 1)
         out = append(out, kept(node_do(doc.nodes[rows[best].node_id])))
     out
 
@@ -1740,6 +1811,45 @@ public define reading_order_in(doc: SemanticDocument, placed: [Measured], zone: 
 public define spoken_name(node: Node) -> text:
     l = prop_val(node, "says")
     if l is not "" then l else if node_text(node) is not "" then node_text(node) else node_do(node)
+
+# --- the screen, said out loud ----------------------------------------------
+#
+# A blind person uses a program through a screen reader, and a screen reader
+# needs to be TOLD what is there - it cannot look at pixels. veil already
+# knows every part of the answer: what each thing is (its role), what it is
+# called (`spoken_name`), what state it is in, and the order a person reads
+# them (`reading_order`, derived from where they actually ended up).
+#
+# So this is not new knowledge, it is the knowledge gathered in one place and
+# handed to whoever can speak it: the page turns it into ARIA, and a native
+# host into whatever its platform uses. The one rule is that this list and
+# the ring walk the SAME order, because a screen reader and a keyboard are
+# the same person navigating the same screen.
+# `role_name` rather than `role`, because the wasm backend lays struct fields
+# out by NAME across the whole program and `Node.role` is a Role, not a word.
+# StyleRule already calls the same thing role_name.
+public type Spoken: name: text, role_name: text, says: text, state: text
+
+public define spoken_screen(doc: SemanticDocument, placed: [Measured]) -> [Spoken]:
+    edit out = []
+    loop who in reading_order(doc, placed):
+        edit found = 0 - 1
+        loop i in 0 until length(doc.nodes):
+            if node_name(doc.nodes[i]) is who:
+                found = i
+        if found >= 0:
+            node = doc.nodes[found]
+            out = append(out, Spoken{name: kept(who), role_name: kept(node.role.name), says: kept(spoken_name(node)), state: kept(said_state(node))})
+    out
+
+# What a thing is DOING, in one word: what a reader says after the name.
+# `off` beats everything - a control nobody can use is not a control that is
+# merely unchecked.
+define said_state(node: Node) -> text:
+    if node_off(node):
+        return "off"
+    s = prop_val(node, "state")
+    if s is not "" then s else ""
 
 # The rect of the node that answers to `name`, out of a layout already
 # done. What a host needs when it draws its own art into a reserved box.
@@ -2062,7 +2172,9 @@ define add_bar_for(doc: SemanticDocument, theme: Theme, measured: [Measured], no
         return into
     style = style_of(theme, node)
     wide = 4.0
-    x = box.x + box.wide - wide - 2.0
+    # On the other side when the screen reads the other way, because a
+    # scrollbar sits at the end of the line and the end has moved.
+    x = if mirrored(doc) then box.x + 2.0 else box.x + box.wide - wide - 2.0
     tall = box.high - 4.0
     grip = tall * to_real(seen) / to_real(reach)
     least = 24.0
@@ -2265,7 +2377,7 @@ define paint_one(doc: SemanticDocument, theme: Theme, face: Font, measured: [Mea
             else:
                 [node_text(node)]
             shown_lines = if node_trims(node) then [trim_to(node_text(node), size, face, to_whole(r.wide) - pad * 2)] else lines
-            list = push_lines(list, shown_lines, r, pad, size, faded(arriving(who, "fg", node_fg(node, style)), dim), face, node, i)
+            list = push_lines(list, shown_lines, r, pad, size, faded(arriving(who, "fg", node_fg(node, style)), dim), face, node, i, mirrored(doc))
     list
 
 # Picking walks the TREE in the same order paint does - parent, then
@@ -2389,7 +2501,7 @@ define push_runs(list: DisplayList, runs: [text], x0: number, y: number, ink: te
         i = i + 2
     out
 
-define push_lines(list: DisplayList, lines: [text], r: Rect, pad: number, size: number, ink: text, face: Font, node: Node, src: number) -> DisplayList:
+define push_lines(list: DisplayList, lines: [text], r: Rect, pad: number, size: number, ink: text, face: Font, node: Node, src: number, rtl: truth) -> DisplayList:
     lh = line_high(size, face)
     block = length(lines) * lh
     lone = length(node.children) is 0
@@ -2397,7 +2509,11 @@ define push_lines(list: DisplayList, lines: [text], r: Rect, pad: number, size: 
     # A line pushed to the far side. `align` means the cross axis for a box
     # with children and the line's own side for one without, which is the
     # same word meaning the same thing at two scales.
-    ended = prop_val(node, "align") is "end" and lone
+    # A line ends where the reading does. On a screen that reads the other
+    # way that is the LEFT edge for the words and the right edge for where
+    # the line starts - so a label narrower than its box sits against the
+    # right of it, without any document having to say so.
+    ended = (prop_val(node, "align") is "end" or rtl) and lone and not centred
     middled = prop_val(node, "justify") is "center" and lone
     # Padding that does not fit is not a licence to draw outside the box.
     # A box shorter than its own padding used to put its line BELOW itself,

@@ -421,6 +421,33 @@ public define pad_key() -> number:
         return pad_says(7, 9, 1)       # the other one = shift+tab
     0
 
+# --- the screen, said out loud ----------------------------------------------
+#
+# A canvas is a wall to a screen reader: it can be looked at and never read.
+# So the same screen exists a second time beside it as plain elements, out of
+# sight, and a reader reads those.
+#
+# It takes the frame the page is ALREADY holding. The first version built a
+# whole frame per line to answer forty questions, which is forty cold frames
+# a beat and ran the module out of memory in about a second - a good reminder
+# that an export which looks like a getter can be the most expensive call in
+# the program.
+#
+# One string, lines separated by newlines and fields by tabs, because a name
+# can have a space in it and cannot have a tab.
+public define spoken_all(before: Frame) -> text:
+    said = spoken_screen(before.doc, before.placed)
+    edit out = ""
+    loop i in 0 until length(said):
+        one = said[i]
+        gap = if i is 0 then "" else "\n"
+        out = "{out}{gap}{one.name}\t{one.role_name}\t{one.says}\t{one.state}"
+    out
+
+# Which one has the ring, so the reader follows the keyboard.
+public define spoken_focus() -> text:
+    slot_get("g:focus")
+
 public define blank() -> Frame:
     on = orion_persist_on()
     it = first_frame(SemanticDocument{root: 0, nodes: []}, gallery_theme(), font_body(), box())

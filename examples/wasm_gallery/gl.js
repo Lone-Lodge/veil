@@ -279,7 +279,13 @@ function makeGl(canvas) {
   // and they are small, so they go on ONE sheet and a picture stays what
   // everything else is: an instance in the same draw call. A picture too
   // big for the sheet is left out rather than drawn wrong, and says so.
-  const ART = 1024;
+  // How big the picture sheet is. 2048 rather than 1024 because a panel
+  // skin and a handful of icons filled the old one, and a picture that does
+  // not fit is skipped rather than drawn wrong - which reads as a bug in
+  // the program rather than as a full sheet. Every WebGL2 machine has at
+  // least 2048; most have 16384, so the real cap is asked for rather than
+  // assumed.
+  const ART = Math.min(4096, gl.getParameter(gl.MAX_TEXTURE_SIZE) || 2048);
   const easel = document.createElement('canvas');
   easel.width = ART; easel.height = ART;
   const brush = easel.getContext('2d', { willReadFrequently: true });
@@ -295,6 +301,49 @@ function makeGl(canvas) {
 
   // Where a picture sits on the sheet, in pixels. Answers null while it is
   // still loading and forever if it will not fit.
+  // --- a slide of colour ----------------------------------------------------
+  //
+  // A gradient is baked onto the picture sheet as a strip and then drawn as
+  // a picture. That is the whole implementation, and it buys three things
+  // the shader branch could not: as many stops as you like, any direction,
+  // and no branch in the shader at all.
+  //
+  //     grad:0a0a0a:2a2a2a            two stops, down the box
+  //     grad:across:f00:0f0:00f       three stops, left to right
+  //
+  // The strip is 64 long, which is more steps than a screen can show across
+  // a panel and small enough that a hundred different gradients cost less
+  // than one icon.
+  const slides = new Map();
+  function slideFor(said) {
+    let s = slides.get(said);
+    if (s !== undefined) return s;
+    const parts = said.split(':');
+    const across = parts[1] === 'across';
+    const stops = parts.slice(across ? 2 : 1).map(hex => {
+      const v = parseInt(hex.replace('#', '').slice(0, 6), 16) || 0;
+      const a = hex.length >= 8 ? parseInt(hex.slice(6, 8), 16) : 255;
+      return [(v >> 16) & 255, (v >> 8) & 255, v & 255, a];
+    });
+    if (stops.length < 2) { slides.set(said, null); return null; }
+    const N = 64;
+    const strip = document.createElement('canvas');
+    strip.width = across ? N : 1;
+    strip.height = across ? 1 : N;
+    const ink = strip.getContext('2d');
+    const run = ink.createImageData(across ? N : 1, across ? 1 : N);
+    for (let i = 0; i < N; i++) {
+      // Where this step falls between which two stops.
+      const t = i / (N - 1) * (stops.length - 1);
+      const lo = Math.min(stops.length - 2, Math.floor(t)), f = t - lo;
+      for (let c = 0; c < 4; c++) run.data[i * 4 + c] = Math.round(stops[lo][c] + (stops[lo + 1][c] - stops[lo][c]) * f);
+    }
+    ink.putImageData(run, 0, 0);
+    s = artFor('grad|' + said, strip);
+    slides.set(said, s);
+    return s;
+  }
+
   function artFor(name, img) {
     let a = arts.get(name);
     if (a !== undefined) return a;
@@ -432,5 +481,5 @@ function makeGl(canvas) {
   }
 
   return { gl, put, flush, begin, polygon, faceOf, glyphOf, rowFor, reuse, at,
-           artFor, artSize, clip: (c) => { clipNow = c || NO_CLIP; } };
+           artFor, artSize, slideFor, clip: (c) => { clipNow = c || NO_CLIP; } };
 }

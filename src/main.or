@@ -423,6 +423,38 @@ define main() -> number:
     check("the third is in the last column", 100, to_whole(gplaced[2].rect.x))
     check("columns share the width evenly", 40, to_whole(gplaced[0].rect.wide))
 
+    section("read the other way")
+    # Arabic and Hebrew do not put a left-to-right screen in a mirror; the
+    # whole screen turns over. A row of three buttons runs the other way,
+    # and the scrollbar moves to the left.
+    r_a = Node{role: role("row"), props: [NodeProp{key: "w", content: "40"}, NodeProp{key: "h", content: "20"}], children: []}
+    r_b = Node{role: role("row"), props: [NodeProp{key: "w", content: "40"}, NodeProp{key: "h", content: "20"}], children: []}
+    r_row = Node{role: role("well"), props: [NodeProp{key: "layout", content: "row"}, NodeProp{key: "gap", content: "10"}], children: [0, 1]}
+    r_rtl = Node{role: role("well"), props: [NodeProp{key: "layout", content: "row"}, NodeProp{key: "gap", content: "10"}, NodeProp{key: "dir", content: "rtl"}], children: [0, 1]}
+    r_th = Theme{rules: [StyleRule{role_name: "well", padding: 0, gap: 0, fg_colour: "", bg_colour: "", direction: "column", radius: 0, size: 13, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}, StyleRule{role_name: "row", padding: 0, gap: 0, fg_colour: "", bg_colour: "#222", direction: "row", radius: 0, size: 13, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}]}
+    r_box = Rect{x: 0, y: 0, wide: 200, high: 40}
+    r_ltr_p = layout_in(SemanticDocument{root: 2, nodes: [r_a, r_b, r_row]}, r_th, face, r_box)
+    r_rtl_p = layout_in(SemanticDocument{root: 2, nodes: [r_a, r_b, r_rtl]}, r_th, face, r_box)
+    check("the first button starts at the left", 0, to_whole(r_ltr_p[0].rect.x))
+    check("and the second beside it", 50, to_whole(r_ltr_p[1].rect.x))
+    # Turned over: the first is now at the right edge, the second inside it.
+    check("turned over, the first is at the right", 160, to_whole(r_rtl_p[0].rect.x))
+    check("and the second inside it", 110, to_whole(r_rtl_p[1].rect.x))
+    # Down is still down. Only the line turned around.
+    check("and nothing moved vertically", to_whole(r_ltr_p[0].rect.y), to_whole(r_rtl_p[0].rect.y))
+
+    # And a line narrower than its box sits against the side the reading
+    # ends at, without any document having to say so.
+    t_word = Node{role: role("lead"), props: [NodeProp{key: "text", content: "hej"}, NodeProp{key: "w", content: "200"}, NodeProp{key: "h", content: "20"}], children: []}
+    t_th = Theme{rules: [StyleRule{role_name: "lead", padding: 0, gap: 0, fg_colour: "#eeeeee", bg_colour: "", direction: "row", radius: 0, size: 13, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}, StyleRule{role_name: "well", padding: 0, gap: 0, fg_colour: "", bg_colour: "", direction: "column", radius: 0, size: 13, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}]}
+    t_left = Node{role: role("well"), props: [], children: [0]}
+    t_right = Node{role: role("well"), props: [NodeProp{key: "dir", content: "rtl"}], children: [0]}
+    t_box = Rect{x: 0, y: 0, wide: 200, high: 20}
+    t_ltr = first_text_x(resolve_in(SemanticDocument{root: 1, nodes: [t_word, t_left]}, t_th, face, t_box))
+    t_rtl = first_text_x(resolve_in(SemanticDocument{root: 1, nodes: [t_word, t_right]}, t_th, face, t_box))
+    check("a word starts at the left", 0, to_whole(t_ltr))
+    check_true("and on a mirrored screen it ends at the right", t_rtl > 150.0)
+
     section("text on its way in")
     # Letters on their way to becoming a word are underlined while they are
     # still undecided - which is how every IME on every platform says
@@ -437,6 +469,28 @@ define main() -> number:
     # Nothing marked, nothing drawn - a settled field costs what it always did.
     m_none = Node{role: role("row"), props: [NodeProp{key: "text", content: "nihon"}, NodeProp{key: "caret", content: "5"}, NodeProp{key: "compose_from", content: "2"}, NodeProp{key: "compose_to", content: "2"}, NodeProp{key: "w", content: "200"}, NodeProp{key: "h", content: "24"}], children: []}
     check("an empty range draws nothing", m_bare, cmd_count(resolve_in(SemanticDocument{root: 0, nodes: [m_none]}, m_th, face, m_box)))
+
+    section("the screen, said out loud")
+    # A screen reader cannot look at pixels: it has to be told. veil knows
+    # every part of the answer already - what a thing is, what it is called,
+    # what state it is in, and the order a person reads them - so this is
+    # that knowledge gathered rather than invented.
+    say_btn = Node{role: role("btn"), props: [NodeProp{key: "do", content: "save"}, NodeProp{key: "text", content: "Spara"}, NodeProp{key: "w", content: "80"}, NodeProp{key: "h", content: "20"}], children: []}
+    say_icon = Node{role: role("btn"), props: [NodeProp{key: "do", content: "x"}, NodeProp{key: "says", content: "Stäng"}, NodeProp{key: "icon", content: "x"}, NodeProp{key: "state", content: "off"}, NodeProp{key: "off", content: "1"}, NodeProp{key: "w", content: "20"}, NodeProp{key: "h", content: "20"}], children: []}
+    say_root = Node{role: role("well"), props: [], children: [0, 1]}
+    say_th = Theme{rules: [StyleRule{role_name: "well", padding: 0, gap: 0, fg_colour: "", bg_colour: "", direction: "column", radius: 0, size: 13, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}, StyleRule{role_name: "btn", padding: 0, gap: 0, fg_colour: "#eee", bg_colour: "#222", direction: "row", radius: 0, size: 13, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}]}
+    say_doc = SemanticDocument{root: 2, nodes: [say_btn, say_icon, say_root]}
+    say_placed = layout_in(say_doc, say_th, face, Rect{x: 0, y: 0, wide: 100, high: 100})
+    said = spoken_screen(say_doc, say_placed)
+    check("everything with a name is spoken", 2, length(said))
+    check_text("a button says its words", "Spara", said[0].says)
+    check_text("and carries its role", "btn", said[0].role_name)
+    # An icon shows nothing to read, so `says` is what it is called.
+    check_text("an icon says what it is for", "Stäng", said[1].says)
+    check_text("and a control nobody can use says so", "off", said[1].state)
+    # The reader and the ring walk the same order, because they are the same
+    # person navigating the same screen.
+    check_text("the reader walks the ring's order", said[0].name, reading_order(say_doc, say_placed)[0])
 
     section("who gets the input")
     # A game asks the UI before it acts, because the UI is on top.
@@ -526,6 +580,40 @@ define main() -> number:
     # Two clips, the box, three rows, and the two the scrollbar adds. Eight
     # commands for twenty-four thousand rows.
     check("and costs what is in it", 8, cmd_count(resolve_in(l_doc, l_th, face, Rect{x: 0, y: 0, wide: 100, high: 60})))
+
+    # And a list whose rows are NOT all the same height says only how many
+    # there are. Then the length of it is the average of the ones in hand -
+    # a guess that gets better as you go, and exact once you have been
+    # everywhere.
+    edit odd = []
+    odd = append(odd, Node{role: role("row"), props: [NodeProp{key: "h", content: "10"}, NodeProp{key: "fill", content: "1"}], children: []})
+    odd = append(odd, Node{role: role("row"), props: [NodeProp{key: "h", content: "20"}, NodeProp{key: "fill", content: "1"}], children: []})
+    odd = append(odd, Node{role: role("row"), props: [NodeProp{key: "h", content: "30"}, NodeProp{key: "fill", content: "1"}], children: []})
+    guessing = Node{role: role("well"), props: [NodeProp{key: "id", content: "chat"}, NodeProp{key: "rows", content: "1000"}, NodeProp{key: "from", content: "10"}, NodeProp{key: "h", content: "60"}, NodeProp{key: "clip", content: "1"}, NodeProp{key: "scroll_y", content: "200"}], children: [0, 1, 2]}
+    g_doc = SemanticDocument{root: 3, nodes: append(odd, guessing)}
+    g_placed = layout_in(g_doc, l_th, face, Rect{x: 0, y: 0, wide: 100, high: 60})
+    # Ten, twenty and thirty average twenty, so row 10 belongs 200 down -
+    # and the box is scrolled exactly that far.
+    check("a row lands on the average of the ones in hand", 0, to_whole(g_placed[0].rect.y))
+    # A thousand rows of twenty on average.
+    check("and the list is as long as that average says", 20000, content_reach(g_doc, g_placed, "chat"))
+
+    # The same idea one dimension further: a bag of ten thousand slots, four
+    # across, showing eight. The eight know their own index and land in the
+    # cells it names.
+    edit slots = []
+    loop _s in 0 until 8:
+        slots = append(slots, Node{role: role("row"), props: [NodeProp{key: "h", content: "20"}], children: []})
+    bag = Node{role: role("well"), props: [NodeProp{key: "id", content: "bag"}, NodeProp{key: "layout", content: "grid"}, NodeProp{key: "cols", content: "4"}, NodeProp{key: "rows", content: "10000"}, NodeProp{key: "row_h", content: "20"}, NodeProp{key: "from", content: "400"}, NodeProp{key: "h", content: "60"}, NodeProp{key: "clip", content: "1"}, NodeProp{key: "scroll_y", content: "2000"}], children: [0, 1, 2, 3, 4, 5, 6, 7]}
+    b_doc = SemanticDocument{root: 8, nodes: append(slots, bag)}
+    b_placed = layout_in(b_doc, l_th, face, Rect{x: 0, y: 0, wide: 100, high: 60})
+    # Item 400 is the first of row 100, which is 2000 down - and the bag is
+    # scrolled exactly that far, so it sits at the top of what can be seen.
+    check("a slot lands in the cell its index names", 0, to_whole(b_placed[0].rect.y))
+    check("and the fifth is on the next row down", 20, to_whole(b_placed[4].rect.y))
+    check("and back at the left of it", 0, to_whole(b_placed[4].rect.x))
+    # Ten thousand slots four across is two thousand five hundred rows.
+    check("a grid stacks rows, not items", 50000, content_reach(b_doc, b_placed, "bag"))
 
     section("scrollbar")
     # Scroll that leaves no mark is scroll nobody finds. The bar comes out
@@ -936,6 +1024,18 @@ define main() -> number:
     # Non-zero on failure: this is what lets the gate see a regression instead of
     # a wall of text that reads fine at a glance.
     if failed is 0 then 0 else 1
+
+# Where the first line of text was actually put, which is the only honest
+# way to ask whether it ended up on the side the reading ends at.
+define first_text_x(list: DisplayList) -> number:
+    edit found = 0.0 - 1.0
+    loop cmd in list.commands:
+        choose cmd:
+            DrawText(at, _t, _ink, _size, _src) then
+                if found < 0.0:
+                    found = at.x
+            _ then 0
+    found
 
 define cmd_count(list: DisplayList) -> number:
     edit c = 0
