@@ -619,6 +619,10 @@ const env = {
   // two blocks of numbers; nothing here reads a string it does not have to.
   page_frame: (cmdsPtr, count, wordsPtr) => (onGpu ? glFrame : paintFrame)(cmdsPtr, count, wordsPtr),
 };
+// The controllers, answered exactly the way the Windows runtime answers them,
+// so the same orion code reads a pad in a tab and in a window. Added rather
+// than spread, because the pad lives further down the page than this table.
+
 
 // --- one frame ------------------------------------------------------------
 // Clear, call, wind the bump pointer back. That last line IS the frame
@@ -750,7 +754,11 @@ function middling() {
   return s[n >> 1];
 }
 
+let lastFinger = 0;
 function later(what, x, y, code, mods) {
+  // Who is driving. A finger and a mouse arrive as the same pointer event,
+  // so the pointer handlers say which, and everything else is a keyboard.
+  lastInput = (what === CHAR || what === KEY) ? 2 : (lastFinger ? 3 : 1);
   const back = waiting[waiting.length - 1];
   // Moves collapse into each other - only the newest position matters. Wheel
   // steps add up, so a fast flick still travels its whole distance. A press,
@@ -763,9 +771,138 @@ function later(what, x, y, code, mods) {
   waiting.push([what, x, y, code | 0, mods | 0]);
 }
 
+// --- a hand controller ----------------------------------------------------
+//
+// The module reads a pad through the same input orb a native program uses:
+// fourteen buttons named for what they MEAN - south, east, l1, start - and
+// six axes. So WHAT a button does is decided once, in orion, and works in a
+// tab and in a window without being written twice.
+//
+// The browser has already done the hard half. Its standard mapping is the
+// same virtual pad our Windows runtime assembles by hand out of XInput and
+// raw HID, which is why this file is short and that one is not.
+//
+// `step` and `pressed` answer about the MOMENT and not the state, so exactly
+// one reader may ask them: the second ask in a frame has nothing left to
+// report. Here that reader is the module, once per beat.
+const PAD_STD = [0, 1, 2, 3, 4, 5, 8, 9, 12, 13, 14, 15, 10, 11];  // ours -> the browser's
+const padDue = new Map();
+const padWas = new Map();
+const padDir = new Map();
+
+function padLive() {
+  if (!navigator.getGamepads) return [];
+  const out = [];
+  for (const p of navigator.getGamepads()) if (p && p.connected) out.push(p);
+  return out;
+}
+function padAt(i) { const all = padLive(); return i >= 0 && i < all.length ? all[i] : null; }
+
+function padHeld(p, b) {
+  const at = PAD_STD[b];
+  return at !== undefined && p.buttons.length > at && p.buttons[at].pressed;
+}
+
+// A thumb resting on a stick is not a push, in a tab as much as anywhere.
+function padDead(v) {
+  const a = Math.abs(v);
+  if (a <= 0.12) return 0;
+  return Math.round(Math.sign(v) * Math.min(1, (a - 0.12) / 0.88) * 1000);
+}
+
+const padEnv = {
+  oi_pad_count: () => padLive().length,
+  oi_pad_kind: (i) => {
+    const p = padAt(i);
+    if (!p) return 0;
+    const id = (p.id || '').toLowerCase();
+    if (id.includes('054c') || id.includes('dualsense') || id.includes('dualshock')) return id.includes('0ce6') || id.includes('dualsense') ? 2 : 3;
+    if (id.includes('045e') || id.includes('xbox')) return 1;
+    if (id.includes('057e') || id.includes('nintendo') || id.includes('switch')) return 4;
+    return 5;
+  },
+  oi_pad_id: (i) => {
+    const p = padAt(i);
+    const m = p && /([0-9a-f]{4}).*?([0-9a-f]{4})/i.exec((p.id || '').replace(/^.*vendor:?\s*/i, ''));
+    return m ? (parseInt(m[1], 16) << 16) | parseInt(m[2], 16) : 0;
+  },
+  // 0 lx, 1 ly, 2 rx, 3 ry, 4 l2, 5 r2. The browser already points Y down.
+  oi_pad_axis: (i, which) => {
+    const p = padAt(i);
+    if (!p) return 0;
+    if (which >= 4) {
+      const at = which === 4 ? 6 : 7;
+      return p.buttons.length > at ? Math.round(p.buttons[at].value * 1000) : 0;
+    }
+    return p.axes.length > which ? padDead(p.axes[which]) : 0;
+  },
+  oi_pad_button: (i, b) => {
+    const p = padAt(i);
+    return p && padHeld(p, b) ? 1 : 0;
+  },
+  // One step, then a breath, then a steady repeat - the way a held arrow key
+  // behaves, because a menu wants steps and not a velocity.
+  oi_pad_step: (i, axis) => {
+    const p = padAt(i);
+    if (!p) return 0;
+    const v = padEnv.oi_pad_axis(i, axis) / 1000;
+    const less = axis === 0 ? 10 : 8, more = axis === 0 ? 11 : 9;
+    const dir = padHeld(p, less) ? -1 : padHeld(p, more) ? 1 : (v > 0.4 ? 1 : v < -0.4 ? -1 : 0);
+    const id = i + ':' + axis;
+    const now = performance.now();
+    if (dir === 0) { padDir.delete(id); return 0; }
+    if (padDir.get(id) !== dir) { padDir.set(id, dir); padDue.set(id, now + 380); return dir; }
+    if (now >= padDue.get(id)) { padDue.set(id, now + 90); return dir; }
+    return 0;
+  },
+  oi_pad_pressed: (i, b) => {
+    const p = padAt(i);
+    if (!p) return 0;
+    const id = i + ':' + b, now = padHeld(p, b);
+    const was = padWas.get(id) === true;
+    padWas.set(id, now);
+    return now && !was ? 1 : 0;
+  },
+  // A browser hands over a mapped pad, never the raw report. Nothing to say.
+  oi_pad_byte: () => 0,
+  oi_pad_len: () => 0,
+  // What the search had to look through. Windows answers with every HID
+  // device on the machine; a browser only ever shows gamepads, so the
+  // number is the slots it offers - and a zero still means the same thing
+  // it means natively: there was no search to run.
+  oi_hid_seen: () => (navigator.getGamepads ? navigator.getGamepads().length : 0),
+  oi_touch: () => (lastInput === 3 ? 1 : 0),
+  oi_composing: () => allocText(composing),
+  oi_composing_at: () => composingAt,
+  oi_composing_on: () => composingOn,
+  oi_last_input: () => lastInput,
+};
+
+Object.assign(env, padEnv);
+
+// 0 nobody yet, 1 mouse, 2 keys, 3 touch, 4 pad. The same four the Windows
+// runtime reports, so a UI decides the same way in both places: whether to
+// draw a focus ring at all, and whether hover means anything.
+let lastInput = 0;
+
 function beat() {
   requestAnimationFrame(beat);
   if (!mod) return;
+  // Asked every frame, because a pad has nothing to tell the page until it
+  // does: there is no event to wait for, only a button that is now down.
+  //
+  // What a button MEANS is decided in orion, next to everything else the
+  // gallery decides, and comes back packed as one number - an export
+  // returns one value. This page only reports which buttons are down.
+  // Not `said`: the status line further down owns that name, and shadowing
+  // it made this whole function assign to a constant.
+  const padSaid = mod.pad_key();
+  if (padSaid) {
+    later(Math.floor(padSaid / 100000), 0, 0, Math.floor(padSaid / 10) % 10000, padSaid % 10);
+    // Said AFTER, because a pad arrives dressed as a key and `later` would
+    // otherwise call it a keyboard - which is the one thing it is not.
+    lastInput = 4;
+  }
   if (waiting.length === 0) {
     // Nobody touched anything. If nothing on this screen is moving either,
     // it is the same picture it was a moment ago - and building it again to
@@ -795,14 +932,23 @@ function beat() {
 }
 
 let down = false;
-cv.addEventListener('pointermove', e => { const at = spot(e); later(down ? DRAG : MOVE, at[0], at[1], 0, 0); });
+cv.addEventListener('pointermove', e => { const at = spot(e); lastFinger = finger(e); later(down ? DRAG : MOVE, at[0], at[1], 0, 0); });
 // Whether a finger or a mouse is doing this. It matters in exactly one
 // place: a finger dragging empty space is scrolling, a mouse is not.
 const finger = e => (e.pointerType === 'touch' || e.pointerType === 'pen') ? 1 : 0;
+// The page's own context menu would cover the one the program draws.
+cv.addEventListener('contextmenu', e => e.preventDefault());
 cv.addEventListener('pointerdown', e => {
   down = true;
-  cv.setPointerCapture(e.pointerId);
-  const at = spot(e); later(DOWN, at[0], at[1], 0, finger(e));
+  lastFinger = finger(e);
+  // WHICH button, the way the native app says it: `e.key is 2` is the right
+  // one. Without this a right-click never reached veil at all and the
+  // context menu the gallery advertises could not be opened in a tab.
+  const at = spot(e); later(DOWN, at[0], at[1], e.button | 0, finger(e));
+  // Capture AFTER the press is queued, and never let it lose one. It keeps
+  // a drag alive when the pointer leaves the canvas, which is worth having
+  // and is not worth a press for.
+  try { cv.setPointerCapture(e.pointerId); } catch (err) {}
 });
 addEventListener('pointerup', e => {
   if (!down) return;
@@ -818,7 +964,42 @@ cv.addEventListener('wheel', e => {
 // A key belongs to whatever the screen says is being typed into. Codes for
 // the ones that MOVE, a character for the rest - the split every editor makes.
 const KEYS = { Backspace: 8, Delete: 46, ArrowLeft: 37, ArrowRight: 39, ArrowUp: 38, ArrowDown: 40, Home: 36, End: 35, Enter: 13, Tab: 9, Escape: 27 };
+// --- text on its way in ----------------------------------------------------
+//
+// Typing Japanese means typing "nihon" and then picking which way to write
+// it. A browser only tells you about that through composition events, and it
+// only sends those to something editable - a canvas is not. So there is one
+// input off the side of the page, kept focused, and it does two jobs: it
+// carries the composition, and it is what makes a phone put its keyboard up
+// when you touch the page at all.
+//
+// It never keeps what is typed in it. Ordinary keys are still read from the
+// keydown below, which fires all the same; the input is cleared on every one
+// so it cannot start behaving like a second field nobody can see.
+const secret = document.createElement('input');
+secret.setAttribute('autocapitalize', 'off');
+secret.setAttribute('autocomplete', 'off');
+secret.setAttribute('spellcheck', 'false');
+secret.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;';
+document.body.appendChild(secret);
+const holdFocus = () => { try { secret.focus({ preventScroll: true }); } catch (err) {} };
+holdFocus();
+addEventListener('pointerdown', holdFocus);
+secret.addEventListener('input', () => { secret.value = ''; });
+
+let composing = '', composingAt = 0, composingOn = 0;
+secret.addEventListener('compositionstart', () => { composingOn = 1; composing = ''; composingAt = 0; });
+secret.addEventListener('compositionupdate', e => {
+  composing = e.data || '';
+  // The caret sits at the end of what has been composed so far, in BYTES,
+  // because that is what every other offset at this seam is.
+  composingAt = new TextEncoder().encode(composing).length;
+});
+secret.addEventListener('compositionend', () => { composingOn = 0; composing = ''; composingAt = 0; secret.value = ''; });
+
 addEventListener('keydown', e => {
+  // While a composition is open the keys belong to it, not to the program.
+  if (e.isComposing || composingOn) return;
   if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) later(CHAR, 0, 0, e.key.codePointAt(0), 0);
   else if (KEYS[e.key] !== undefined) {
     e.preventDefault();

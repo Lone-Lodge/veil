@@ -31,6 +31,7 @@ use veil_motion
 use veil_edit
 use veil_measure
 use typeface
+use input
 
 # How big the screen is, in veil's own pixels. The page owns this: a window
 # is a thing a person drags the corner of, and a UI that cannot answer that
@@ -253,7 +254,14 @@ define handled(g_in: Gallery, doc: SemanticDocument, dress: Theme, face: Font, h
         slot_set("g:hover", pick_placed(doc, dress, here.placed, x, y))
     if what is 3:
         slot_set("g:held", "")
-    if what is 2:
+    # Right-click opens the same menu wherever you are, the way the native
+    # app does it - `e.key is 2` there, the button in `code` here. A context
+    # menu and a dropdown differ only in what decides their corner.
+    if what is 2 and code is 2:
+        slot_set("g:menu", "context")
+        slot_set("g:menu_x", x)
+        slot_set("g:menu_y", y)
+    if what is 2 and code is not 2:
         on = pick_placed(doc, dress, here.placed, x, y)
         # The SAME press chain the native app runs. Hover is written AFTER
         # the save, because the save writes back the hover the frame was
@@ -318,11 +326,17 @@ define handled(g_in: Gallery, doc: SemanticDocument, dress: Theme, face: Font, h
         # layout already worked out. Nobody keeps a list of what is beside
         # what, so a screen that grew a control yesterday is walked today.
         else if code is 37 or code is 38 or code is 39 or code is 40:
-            ax = if code is 37 then 0 - 1 else if code is 39 then 1 else 0
-            ay = if code is 38 then 0 - 1 else if code is 40 then 1 else 0
-            leant = near_toward(doc, here.placed, g.focus, ax, ay)
-            if leant is not "":
-                put_arrow = ring_on(leant)
+            # A control with a value takes left and right for itself. The ring
+            # stops on a slider either way; this is what makes stopping there
+            # worth anything.
+            if takes_arrows(g.focus) and (code is 37 or code is 39):
+                save(nudged(g, g.focus, if code is 37 then 0 - 5 else 5))
+            else:
+                ax = if code is 37 then 0 - 1 else if code is 39 then 1 else 0
+                ay = if code is 38 then 0 - 1 else if code is 40 then 1 else 0
+                leant = near_toward(doc, here.placed, g.focus, ax, ay)
+                if leant is not "":
+                    put_arrow = ring_on(leant)
 
     # The screen `here` was built from the state as it stood BEFORE the
     # event. If the event changed nothing - and a pointer move over the same
@@ -369,6 +383,43 @@ public define frame(what: number, x: number, y: number, code: number, mods: numb
 # number of arenas is sound. The chain is cut instead: the kept region only
 # grows, and when it is nearly full the page empties it and takes one cold
 # frame - the one frame that needs no chain behind it.
+
+# --- a hand controller -----------------------------------------------------
+#
+# veil already knows what an arrow, a space and an escape mean: the ring
+# walks, a slider takes left and right, a dialog closes. So a pad never
+# reaches into veil at all - it becomes the very event a key sends, and
+# everything downstream works by itself.
+#
+# The waiting, the repeat and the four makes of controller all live in the
+# input orb, which the page answers on the web and the runtime answers in a
+# window. This is what a pad costs an app: nine lines, once.
+#
+# One number back, because that is what an export returns:
+# what * 100000 + code * 10 + shift, and 0 for a pad that said nothing.
+define pad_says(what: number, code: number, shift: number) -> number:
+    what * 100000 + code * 10 + shift
+
+public define pad_key() -> number:
+    x = pad_step_x(0)
+    if x < 0:
+        return pad_says(7, 37, 0)
+    if x > 0:
+        return pad_says(7, 39, 0)
+    y = pad_step_y(0)
+    if y < 0:
+        return pad_says(7, 38, 0)
+    if y > 0:
+        return pad_says(7, 40, 0)
+    if pad_pressed(0, "south"):
+        return pad_says(6, 32, 0)      # space presses what has the ring
+    if pad_pressed(0, "east"):
+        return pad_says(7, 27, 0)      # escape closes what is open
+    if pad_pressed(0, "r1"):
+        return pad_says(7, 9, 0)       # shoulder = tab
+    if pad_pressed(0, "l1"):
+        return pad_says(7, 9, 1)       # the other one = shift+tab
+    0
 
 public define blank() -> Frame:
     on = orion_persist_on()

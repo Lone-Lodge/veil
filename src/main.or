@@ -423,6 +423,110 @@ define main() -> number:
     check("the third is in the last column", 100, to_whole(gplaced[2].rect.x))
     check("columns share the width evenly", 40, to_whole(gplaced[0].rect.wide))
 
+    section("text on its way in")
+    # Letters on their way to becoming a word are underlined while they are
+    # still undecided - which is how every IME on every platform says
+    # "these four are not settled yet".
+    m_plain = Node{role: role("row"), props: [NodeProp{key: "text", content: "nihon"}, NodeProp{key: "caret", content: "5"}, NodeProp{key: "w", content: "200"}, NodeProp{key: "h", content: "24"}], children: []}
+    m_comp = Node{role: role("row"), props: [NodeProp{key: "text", content: "nihon"}, NodeProp{key: "caret", content: "5"}, NodeProp{key: "compose_from", content: "0"}, NodeProp{key: "compose_to", content: "5"}, NodeProp{key: "w", content: "200"}, NodeProp{key: "h", content: "24"}], children: []}
+    m_th = Theme{rules: [StyleRule{role_name: "row", padding: 0, gap: 0, fg_colour: "#eeeeee", bg_colour: "", direction: "row", radius: 0, size: 13, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}]}
+    m_box = Rect{x: 0, y: 0, wide: 200, high: 24}
+    m_bare = cmd_count(resolve_in(SemanticDocument{root: 0, nodes: [m_plain]}, m_th, face, m_box))
+    m_line = cmd_count(resolve_in(SemanticDocument{root: 0, nodes: [m_comp]}, m_th, face, m_box))
+    check("composing text draws one line under it", 1, m_line - m_bare)
+    # Nothing marked, nothing drawn - a settled field costs what it always did.
+    m_none = Node{role: role("row"), props: [NodeProp{key: "text", content: "nihon"}, NodeProp{key: "caret", content: "5"}, NodeProp{key: "compose_from", content: "2"}, NodeProp{key: "compose_to", content: "2"}, NodeProp{key: "w", content: "200"}, NodeProp{key: "h", content: "24"}], children: []}
+    check("an empty range draws nothing", m_bare, cmd_count(resolve_in(SemanticDocument{root: 0, nodes: [m_none]}, m_th, face, m_box)))
+
+    section("who gets the input")
+    # A game asks the UI before it acts, because the UI is on top.
+    i_btn = Node{role: role("row"), props: [NodeProp{key: "do", content: "fire"}, NodeProp{key: "w", content: "80"}, NodeProp{key: "h", content: "20"}], children: []}
+    i_field = Node{role: role("row"), props: [NodeProp{key: "do", content: "chat"}, NodeProp{key: "caret", content: "3"}, NodeProp{key: "w", content: "80"}, NodeProp{key: "h", content: "20"}], children: []}
+    i_root = Node{role: role("well"), props: [NodeProp{key: "w", content: "80"}], children: [0]}
+    i_th = Theme{rules: [StyleRule{role_name: "well", padding: 0, gap: 0, fg_colour: "", bg_colour: "", direction: "column", radius: 0, size: 13, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}, StyleRule{role_name: "row", padding: 0, gap: 0, fg_colour: "", bg_colour: "#222", direction: "row", radius: 0, size: 13, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}]}
+    i_doc = SemanticDocument{root: 2, nodes: [i_btn, i_field, i_root]}
+    i_placed = layout_in(i_doc, i_th, face, Rect{x: 0, y: 0, wide: 200, high: 200})
+    check_true("the pointer is over the UI on the button", over_ui(i_doc, i_th, i_placed, 20, 10))
+    check_true("and over the world beside it", not over_ui(i_doc, i_th, i_placed, 150, 150))
+    # No caret anywhere: the keyboard belongs to the game.
+    check_true("nobody is typing", not taking_keys(i_doc))
+    # In the tree, not merely in the array: a field built and never put on
+    # the screen is not a field anybody is typing in.
+    typed = SemanticDocument{root: 2, nodes: [i_field, i_btn, i_root]}
+    check_true("a caret takes the keyboard", taking_keys(typed))
+    # Nothing raised: the pad drives the game.
+    check_true("the pad is the game's", not holding_pad(i_doc))
+    raised_one = Node{role: role("row"), props: [NodeProp{key: "layer", content: "1"}, NodeProp{key: "w", content: "20"}, NodeProp{key: "h", content: "20"}], children: []}
+    check_true("a dialog takes the pad", holding_pad(SemanticDocument{root: 2, nodes: [raised_one, i_btn, i_root]}))
+
+    section("things that hang in the world")
+    # A nameplate belongs OVER a head, and a head that walked off screen
+    # takes its nameplate with it rather than pinning it to the edge.
+    w_plate = Node{role: role("row"), props: [NodeProp{key: "w", content: "60"}, NodeProp{key: "h", content: "20"}, NodeProp{key: "at_x", content: "150"}, NodeProp{key: "at_y", content: "100"}, NodeProp{key: "pin", content: "above"}, NodeProp{key: "world", content: "1"}], children: []}
+    w_gone = Node{role: role("row"), props: [NodeProp{key: "w", content: "60"}, NodeProp{key: "h", content: "20"}, NodeProp{key: "at_x", content: "900"}, NodeProp{key: "at_y", content: "100"}, NodeProp{key: "pin", content: "above"}, NodeProp{key: "world", content: "1"}], children: []}
+    w_menu = Node{role: role("row"), props: [NodeProp{key: "w", content: "60"}, NodeProp{key: "h", content: "20"}, NodeProp{key: "at_x", content: "900"}, NodeProp{key: "at_y", content: "100"}], children: []}
+    w_root = Node{role: role("well"), props: [], children: [0, 1, 2]}
+    w_th = Theme{rules: [StyleRule{role_name: "well", padding: 0, gap: 0, fg_colour: "", bg_colour: "", direction: "column", radius: 0, size: 13, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}, StyleRule{role_name: "row", padding: 0, gap: 0, fg_colour: "", bg_colour: "#222", direction: "row", radius: 0, size: 13, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}]}
+    w_doc = SemanticDocument{root: 3, nodes: [w_plate, w_gone, w_menu, w_root]}
+    w_placed = layout_in(w_doc, w_th, face, Rect{x: 0, y: 0, wide: 400, high: 300})
+    # Centred on the point and lifted clear of it: 150 - 60/2, 100 - 20.
+    check("a plate is centred on its point", 120, to_whole(w_placed[0].rect.x))
+    check("and lifted clear of it", 80, to_whole(w_placed[0].rect.y))
+    # Off the right edge and it stays off, taking its cost with it.
+    check("a point off screen stays off screen", 870, to_whole(w_placed[1].rect.x))
+    # Four nodes, two commands: the plate that is here and the menu that was
+    # dragged back on. The box itself is colourless and the plate off screen
+    # is thrown away at the top of the paint walk - which is why painting
+    # starts from the screen rather than from "no clip at all".
+    check("and is not drawn at all", 2, cmd_count(resolve_in(w_doc, w_th, face, Rect{x: 0, y: 0, wide: 400, high: 300})))
+    # A menu at the same point is dragged back on, because a menu you
+    # cannot see is worse than a menu in the wrong place.
+    check("a menu is still held on screen", 340, to_whole(w_placed[2].rect.x))
+
+    section("zones")
+    # Two panels side by side, each its own zone. The ring walks inside the
+    # one it is in; it does not step across to the other because something
+    # over there happened to be closest.
+    z_a = Node{role: role("row"), props: [NodeProp{key: "do", content: "a1"}, NodeProp{key: "h", content: "20"}, NodeProp{key: "fill", content: "1"}], children: []}
+    z_b = Node{role: role("row"), props: [NodeProp{key: "do", content: "a2"}, NodeProp{key: "h", content: "20"}, NodeProp{key: "fill", content: "1"}], children: []}
+    z_c = Node{role: role("row"), props: [NodeProp{key: "do", content: "b1"}, NodeProp{key: "h", content: "20"}, NodeProp{key: "fill", content: "1"}], children: []}
+    z_d = Node{role: role("row"), props: [NodeProp{key: "do", content: "b2"}, NodeProp{key: "h", content: "20"}, NodeProp{key: "fill", content: "1"}], children: []}
+    z_left = Node{role: role("well"), props: [NodeProp{key: "zone", content: "left"}, NodeProp{key: "w", content: "100"}], children: [0, 1]}
+    z_right = Node{role: role("well"), props: [NodeProp{key: "zone", content: "right"}, NodeProp{key: "w", content: "100"}], children: [2, 3]}
+    z_root = Node{role: role("well"), props: [NodeProp{key: "layout", content: "row"}], children: [4, 5]}
+    z_th = Theme{rules: [StyleRule{role_name: "well", padding: 0, gap: 0, fg_colour: "", bg_colour: "", direction: "column", radius: 0, size: 13, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}, StyleRule{role_name: "row", padding: 0, gap: 0, fg_colour: "", bg_colour: "#222", direction: "row", radius: 0, size: 13, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}]}
+    z_doc = SemanticDocument{root: 6, nodes: [z_a, z_b, z_c, z_d, z_left, z_right, z_root]}
+    z_placed = layout_in(z_doc, z_th, face, Rect{x: 0, y: 0, wide: 200, high: 100})
+    check_text("a thing knows which zone it is in", "left", zone_of(z_doc, "a1"))
+    check_text("down goes to the next one in the zone", "a2", near_toward(z_doc, z_placed, "a1", 0, 1))
+    # a1 and b1 are side by side. Right would find b1 without zones.
+    check_text("right stops at the edge of the panel", "", near_toward(z_doc, z_placed, "a1", 1, 0))
+    check("the zone has its own reading order", 2, length(reading_order_in(z_doc, z_placed, "right")))
+    check("and the screen knows both panels", 2, length(zone_names(z_doc, z_placed)))
+    # Tab is not zone-bound: it means "the next thing on this screen".
+    check("tab still walks the whole screen", 4, length(reading_order(z_doc, z_placed)))
+
+    section("a list that is mostly not there")
+    # Twenty-four thousand rows of which three exist. The box says how many
+    # there are and how tall one is; veil puts the three where their indices
+    # say they belong and reports the whole list's height.
+    edit few = []
+    loop _i in 0 until 3:
+        few = append(few, Node{role: role("row"), props: [NodeProp{key: "h", content: "20"}, NodeProp{key: "fill", content: "1"}], children: []})
+    lazy = Node{role: role("well"), props: [NodeProp{key: "id", content: "lazy"}, NodeProp{key: "rows", content: "24000"}, NodeProp{key: "row_h", content: "20"}, NodeProp{key: "from", content: "500"}, NodeProp{key: "h", content: "60"}, NodeProp{key: "clip", content: "1"}, NodeProp{key: "scrollbar", content: "1"}, NodeProp{key: "scroll_y", content: "10000"}], children: [0, 1, 2]}
+    l_th = Theme{rules: [StyleRule{role_name: "well", padding: 0, gap: 0, fg_colour: "#888888", bg_colour: "#111", direction: "column", radius: 0, size: 13, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}, StyleRule{role_name: "row", padding: 0, gap: 0, fg_colour: "", bg_colour: "#222", direction: "row", radius: 0, size: 13, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}]}
+    l_doc = SemanticDocument{root: 3, nodes: append(few, lazy)}
+    l_placed = layout_in(l_doc, l_th, face, Rect{x: 0, y: 0, wide: 100, high: 60})
+    # Row 500 belongs 10000 pixels down, and the box is scrolled exactly
+    # that far - so it sits at the top of what can be seen.
+    check("the first row given sits where its index says", 0, to_whole(l_placed[0].rect.y))
+    check("and the next one below it", 20, to_whole(l_placed[1].rect.y))
+    # Three rows in the box, twenty-four thousand rows of scrolling.
+    check("a list mostly not there is still its whole length", 480000, content_reach(l_doc, l_placed, "lazy"))
+    # Two clips, the box, three rows, and the two the scrollbar adds. Eight
+    # commands for twenty-four thousand rows.
+    check("and costs what is in it", 8, cmd_count(resolve_in(l_doc, l_th, face, Rect{x: 0, y: 0, wide: 100, high: 60})))
+
     section("scrollbar")
     # Scroll that leaves no mark is scroll nobody finds. The bar comes out
     # of the same rects the scrolling uses, so it can never disagree with
@@ -430,14 +534,29 @@ define main() -> number:
     edit rows = []
     loop _i in 0 until 10:
         rows = append(rows, Node{role: role("row"), props: [NodeProp{key: "h", content: "20"}, NodeProp{key: "fill", content: "1"}], children: []})
-    short = Node{role: role("well"), props: [NodeProp{key: "h", content: "60"}, NodeProp{key: "clip", content: "1"}, NodeProp{key: "scrollbar", content: "1"}], children: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]}
-    tall_box = Node{role: role("well"), props: [NodeProp{key: "h", content: "400"}, NodeProp{key: "clip", content: "1"}, NodeProp{key: "scrollbar", content: "1"}], children: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]}
+    short = Node{role: role("well"), props: [NodeProp{key: "h", content: "60"}, NodeProp{key: "clip", content: "1"}, NodeProp{key: "scroll_y", content: "0"}, NodeProp{key: "scrollbar", content: "1"}], children: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]}
+    # The same box WITHOUT the bar. It has to keep the scroll_y, or it stops
+    # being a scrolling box and squeezes its ten rows into sixty pixels
+    # instead - a different layout, and then the two counts are not
+    # comparable at all.
+    bare = Node{role: role("well"), props: [NodeProp{key: "h", content: "60"}, NodeProp{key: "clip", content: "1"}, NodeProp{key: "scroll_y", content: "0"}], children: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]}
+    tall_box = Node{role: role("well"), props: [NodeProp{key: "h", content: "400"}, NodeProp{key: "clip", content: "1"}, NodeProp{key: "scroll_y", content: "0"}, NodeProp{key: "scrollbar", content: "1"}], children: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]}
     b_th = Theme{rules: [StyleRule{role_name: "well", padding: 0, gap: 0, fg_colour: "#888888", bg_colour: "#111", direction: "column", radius: 0, size: 13, border: 1, border_colour: "#333333", shadow: 0, shadow_colour: ""}, StyleRule{role_name: "row", padding: 0, gap: 0, fg_colour: "", bg_colour: "#222", direction: "row", radius: 0, size: 13, border: 0, border_colour: "", shadow: 0, shadow_colour: ""}]}
-    # A box with more in it than fits: two clip commands, the boxes, and
-    # the two the bar adds.
+    # The bar is worth exactly two commands: a track and a thumb. Measured
+    # against THE SAME BOX without a bar, because a taller box shows more
+    # rows and a count that mixes the two says nothing.
     bar_on = cmd_count(resolve_in(SemanticDocument{root: 10, nodes: append(rows, short)}, b_th, face, Rect{x: 0, y: 0, wide: 100, high: 60}))
-    bar_off = cmd_count(resolve_in(SemanticDocument{root: 10, nodes: append(rows, tall_box)}, b_th, face, Rect{x: 0, y: 0, wide: 100, high: 400}))
+    bar_off = cmd_count(resolve_in(SemanticDocument{root: 10, nodes: append(rows, bare)}, b_th, face, Rect{x: 0, y: 0, wide: 100, high: 60}))
     check("a full box draws a track and a thumb", 2, bar_on - bar_off)
+    # And a box with room for everything draws no bar at all.
+    roomy = cmd_count(resolve_in(SemanticDocument{root: 10, nodes: append(rows, tall_box)}, b_th, face, Rect{x: 0, y: 0, wide: 100, high: 400}))
+    # A box with room for everything draws no bar: four fixed commands - the
+    # two clips, the box and its border - and then a row each.
+    check("a box with room for it all draws no bar", 14, roomy)
+    # And what is scrolled out of sight is not drawn at all. Sixty pixels of
+    # a box holding two hundred shows three rows, so three rows is what it
+    # costs - whether there are ten behind it or twenty thousand.
+    check("only what can be seen is drawn", 3, bar_off - 4)
 
     section("sizes as a share")
     # A document should say what fraction of the room it wants, not work

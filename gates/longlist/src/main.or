@@ -1,0 +1,141 @@
+# Vad kostar en lång lista?
+#
+# En scrollande box mäter och placerar varje barn, även de tusen som ligger
+# utanför rutan. Frågan är inte om det är slöseri - det är det - utan var
+# gränsen går: vid hundra rader, tusen, eller tiotusen. Det avgör om
+# virtualisering är en optimering eller ett hinder.
+#
+# Mäter kallt (byggt från ingenting) och berättat (från förra ramen), för
+# det är två helt olika svar.
+
+use veil_document
+use veil_resolver
+use veil_theme
+use veil_page
+use typeface
+use ori_geometry
+
+define rows(count: number) -> SemanticDocument:
+    edit ns = []
+    edit kids = []
+    loop i in 0 until count:
+        ns = append(ns, n("label", [p("text", "rad {i}")], []))
+        kids = append(kids, top(ns))
+    ns = append(ns, n("panel", [p("pad", "8"), p("gap", "2"), p("scroll_y", "0"), p("scrollbar", "1"), p("clip", "1"), p("h", "600")], kids))
+    SemanticDocument{root: top(ns), nodes: ns}
+
+define dress() -> Theme:
+    a = append([], styled("panel", 8.0, 2.0, "", "#1a1a1e", "column", 0.0, 0.0))
+    b = append(a, styled("label", 0.0, 0.0, "#e6e6e6", "", "row", 0.0, 14.0))
+    Theme{rules: b}
+
+define room() -> Rect:
+    Rect{x: 0.0, y: 0.0, wide: 800.0, high: 600.0}
+
+# Ett varv: bygg dokumentet, mät kallt, mät berättat.
+define one(count: number):
+    doc = rows(count)
+    face = font_body()
+    theme = dress()
+    t0 = monotonic_ms()
+    sizes = measure_all(doc, theme, face)
+    t1 = monotonic_ms()
+    placed = place_all(doc, theme, face, sizes, room())
+    t2 = monotonic_ms()
+    here = first_frame(doc, theme, face, room())
+    t3 = monotonic_ms()
+    later = next_frame(here, doc, theme, face, room())
+    t4 = monotonic_ms()
+    print_line("{count} rader:  mäta {t1 - t0} ms   placera {t2 - t1} ms   hela kallt {t3 - t2} ms   berättat {t4 - t3} ms   kommandon {length(here.list.commands)}")
+
+# Samma antal rader, men i grupper - för att se om kostnaden sitter i hur
+# många SYSKON en förälder har eller i hur många noder det finns totalt.
+define grouped(count: number, per: number) -> SemanticDocument:
+    edit ns = []
+    edit groups = []
+    edit made = 0
+    loop g in 0 until count // per:
+        edit kids = []
+        loop i in 0 until per:
+            ns = append(ns, n("label", [p("text", "rad {made}")], []))
+            kids = append(kids, top(ns))
+            made = made + 1
+        ns = append(ns, n("panel", [p("gap", "2")], kids))
+        groups = append(groups, top(ns))
+    ns = append(ns, n("panel", [p("pad", "8"), p("gap", "2"), p("scroll_y", "0"), p("scrollbar", "1"), p("clip", "1"), p("h", "600")], groups))
+    SemanticDocument{root: top(ns), nodes: ns}
+
+# Samma lista men utan att scrolla eller klippa - för att se om kvadraten
+# sitter i den generella kolumnen eller i scrollvägen.
+define plain(count: number) -> SemanticDocument:
+    edit ns = []
+    edit kids = []
+    loop i in 0 until count:
+        ns = append(ns, n("label", [p("text", "rad {i}")], []))
+        kids = append(kids, top(ns))
+    ns = append(ns, n("panel", [p("pad", "8"), p("gap", "2")], kids))
+    SemanticDocument{root: top(ns), nodes: ns}
+
+define one_plain(count: number):
+    doc = plain(count)
+    face = font_body()
+    theme = dress()
+    t0 = monotonic_ms()
+    sizes = measure_all(doc, theme, face)
+    t1 = monotonic_ms()
+    placed = place_all(doc, theme, face, sizes, room())
+    print_line("{count} rader:  mäta {t1 - t0} ms   placera {monotonic_ms() - t1} ms")
+
+define one_grouped(count: number, per: number):
+    doc = grouped(count, per)
+    face = font_body()
+    theme = dress()
+    t0 = monotonic_ms()
+    sizes = measure_all(doc, theme, face)
+    t1 = monotonic_ms()
+    placed = place_all(doc, theme, face, sizes, room())
+    t2 = monotonic_ms()
+    print_line("{count} rader i grupper om {per}:  mäta {t1 - t0} ms   placera {t2 - t1} ms   placerade {length(placed)}")
+
+# Namnskyltar: hundratals, ankrade till punkter någon annan räknat fram,
+# djupsorterade och de flesta utanför rutan.
+define plates(count: number, on_screen: number) -> SemanticDocument:
+    edit ns = []
+    edit kids = []
+    loop i in 0 until count:
+        x = if i < on_screen then 40 + i % 20 * 38 else 2000 + i
+        y = if i < on_screen then 40 + i // 20 * 24 else 1500
+        ns = append(ns, n("label", [p("text", "Spelare {i}"), p("at_x", "{x}"), p("at_y", "{y}"), p("pin", "above"), p("world", "1"), p("order", "{count - i}")], []))
+        kids = append(kids, top(ns))
+    ns = append(ns, n("panel", [], kids))
+    SemanticDocument{root: top(ns), nodes: ns}
+
+define one_plates(count: number, on_screen: number):
+    doc = plates(count, on_screen)
+    face = font_body()
+    theme = dress()
+    t0 = monotonic_ms()
+    here = first_frame(doc, theme, face, room())
+    t1 = monotonic_ms()
+    later = next_frame(here, doc, theme, face, room())
+    print_line("{count} namnskyltar, {on_screen} i rutan:  kallt {t1 - t0} ms   berättat {monotonic_ms() - t1} ms   kommandon {length(here.list.commands)}")
+
+public define main() -> number:
+    print_line("vad en lång lista kostar, 800x600 ruta")
+    one(100)
+    one(1000)
+    one(5000)
+    one(20000)
+    print_line("")
+    one_grouped(20000, 20000)
+    one_grouped(20000, 1000)
+    one_grouped(20000, 100)
+    print_line("")
+    one_plain(1000)
+    one_plain(5000)
+    one_plain(20000)
+    print_line("")
+    one_plates(100, 60)
+    one_plates(300, 60)
+    one_plates(1000, 60)
+    1

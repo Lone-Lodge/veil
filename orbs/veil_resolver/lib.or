@@ -223,6 +223,12 @@ define node_rolls(node: Node) -> truth:
 # the thumb shot off the end of its track.
 define content_below(doc: SemanticDocument, measured: [Measured], node_id: number, box: Rect) -> number:
     node = doc.nodes[node_id]
+    # A lazy list knows its own length: what is in it is a dozen rows out of
+    # twenty-four thousand, and measuring those would say the list is a dozen
+    # rows long - the thumb would fill the whole track and scrolling would
+    # stop at the twelfth row.
+    if lists_lazily(node):
+        return rows_total(node) * row_height(node)
     edit low = to_whole(box.y)
     loop k in node.children:
         if node_shown(doc.nodes[k]):
@@ -231,6 +237,37 @@ define content_below(doc: SemanticDocument, measured: [Measured], node_id: numbe
             if bottom > low:
                 low = bottom
     low - to_whole(box.y) + node_scroll_y(node)
+
+# --- a list that only has the rows you can see ------------------------------
+#
+# Twenty-four thousand rows of which twelve exist. The box says how many
+# there ARE and how tall one is, and hands over only the ones in view along
+# with the index the first of them has:
+#
+#     win = row_window(24000, 26, 150, at)
+#     n("well", [p("rows", "24000"), p("row_h", "26"), p("from", "{win.first}"),
+#                p("h", "150"), p("clip", "1"), p("scrollbar", "1"),
+#                p("scroll_y", "{at}")], the_twelve)
+#
+# veil puts the first one where its index says it belongs and reports the
+# whole list's height, so the scroll offset and the scrollbar tell the truth
+# about a list that is mostly not there. The app builds twelve nodes, veil
+# measures twelve, places twelve and draws twelve.
+#
+# Rows have to be equally tall - that is the whole of what buys this. A list
+# of things that are each a different height is measured one by one like
+# anything else, and that is still the honest answer for a chat log.
+define rows_total(node: Node) -> number:
+    prop_int(node, "rows", 0)
+
+define row_height(node: Node) -> number:
+    big(prop_int(node, "row_h", 0), scale_now())
+
+define lists_lazily(node: Node) -> truth:
+    rows_total(node) > 0 and row_height(node) > 0
+
+define first_row(node: Node) -> number:
+    prop_int(node, "from", 0)
 
 define node_wraps(node: Node) -> truth:
     prop_val(node, "wrap") is "1"
@@ -659,22 +696,26 @@ define child_order(doc: SemanticDocument, node: Node) -> [number]:
             any_order = true
     if not any_order:
         return ids
+    # The orders are read ONCE, and "already taken" is a mark beside each
+    # rather than a list to rescan. What is left is an honest selection sort:
+    # a thousand nameplates sorted by depth is a million comparisons of two
+    # numbers, not a million walks down a property list inside a scan of
+    # everything taken so far.
+    edit orders = []
+    edit gone = []
+    loop k in ids:
+        orders = append(orders, prop_int(doc.nodes[k], "order", 0))
+    loop _g in 0 until n:
+        gone = append(gone, 0)
     edit out = []
-    edit taken = []
     loop _p in 0 until n:
         edit best_i = 0 - 1
         edit best_o = 0
         loop i in 0 until n:
-            edit already = false
-            loop t in taken:
-                if t is i:
-                    already = true
-            if not already:
-                o = prop_int(doc.nodes[ids[i]], "order", 0)
-                if best_i < 0 or o < best_o:
-                    best_i = i
-                    best_o = o
-        taken = append(taken, best_i)
+            if gone[i] is 0 and (best_i < 0 or orders[i] < best_o):
+                best_i = i
+                best_o = orders[i]
+        gone = set(gone, best_i, 1)
         out = append(out, ids[best_i])
     out
 
@@ -829,6 +870,36 @@ define float_spot(doc: SemanticDocument, acc: [Measured], kid: Node, size: Size2
             y = on.y - to_real(size.h)
         if x + to_real(size.w) > room.x + room.wide and on.x - to_real(size.w) >= room.x:
             x = on.x - to_real(size.w)
+    # --- a point in the world, not a corner of the screen -------------------
+    #
+    # A nameplate belongs over a head, a damage number floats up from a hit,
+    # a quest marker sits on a door. The game does the projecting - veil is
+    # not a camera - and hands over a screen point. What veil owes it is the
+    # two things every one of them needs and no menu does.
+    #
+    # `pin` says how the box sits ON the point rather than starting at it:
+    # "over" is centred both ways, "above" is centred and lifted clear,
+    # "below" is centred and dropped clear. A nameplate that starts at the
+    # point sits down and to the right of the head it names.
+    #
+    # `world: 1` says the point is real, so it is NOT dragged back onto the
+    # screen. A menu that would hang off the bottom should open upwards; a
+    # nameplate whose owner walked behind you should be GONE, not pinned to
+    # the edge shouting. Painting throws away what falls outside the clip,
+    # so a plate off screen costs its own placement and nothing else.
+    #
+    # Depth is `order`, which children are already sorted by: the further
+    # away, the smaller, so the near ones paint last and over.
+    pin = prop_val(kid, "pin")
+    if to is "":
+        if pin is "over" or pin is "above" or pin is "below":
+            x = x - to_real(size.w) / 2.0
+        if pin is "above":
+            y = y - to_real(size.h)
+        if pin is "over":
+            y = y - to_real(size.h) / 2.0
+    if prop_val(kid, "world") is "1":
+        return Point{x: x, y: y}
     # And held inside the room whatever happened, because a thing you
     # cannot see is worse than a thing in the wrong place.
     far_x = room.x + room.wide - to_real(size.w)
@@ -975,9 +1046,15 @@ define place_sized(doc: SemanticDocument, theme: Theme, face: Font, node_id: num
         shift_main = if scrolls_to_end(node) and row then overflow else 0
         shift_x = if row then shift_main else node_scroll_x(node)
         shift_y = if row then node_scroll_y(node) else shift_main + node_scroll_y(node)
-        edit cursor = main_start
+        # The first row the app handed over is not the first row there is.
+        # Its index says where it belongs, and everything below follows from
+        # there - which is why no empty spacer has to stand in for the rest.
+        edit cursor = if lists_lazily(node) then main_start + first_row(node) * row_height(node) else main_start
         edit extra_gap = 0
-        if total_grow is 0 and leftover > 0:
+        # A lazy list has room left over by definition - twelve rows in a box
+        # that holds six - and justifying that space would put the twelve
+        # back at the top, which is exactly where they do not belong.
+        if total_grow is 0 and leftover > 0 and not lists_lazily(node):
             just = prop_val(node, "justify")
             if just is "between" and shown_kids > 1:
                 extra_gap = leftover // (shown_kids - 1)
@@ -1392,13 +1469,21 @@ public define near_toward(doc: SemanticDocument, placed: [Measured], from: text,
     here = rect_of(doc, placed, from)
     fx = here.x + here.wide / 2.0
     fy = here.y + here.high / 2.0
+    # An arrow stays on the top layer too, for the same reason Tab does.
+    levels = layers_of(doc)
+    top = top_layer(levels)
+    # And it stays in its zone. There is nothing over there once the panel
+    # ends - that is what a panel IS. A screen that names no zones has one
+    # called "", and then this line does nothing.
+    zones = zones_of(doc)
+    mine_zone = zone_at(doc, zones, from)
     edit best = ""
     edit best_score = 0
     loop m in placed:
         node = doc.nodes[m.node_id]
         name = node_do(node)
         r = m.rect
-        if name is not "" and name is not from and r.wide > 0.0 and r.high > 0.0:
+        if name is not "" and name is not from and r.wide > 0.0 and r.high > 0.0 and levels[m.node_id] is top and zones[m.node_id] is mine_zone:
             cx = r.x + r.wide / 2.0
             cy = r.y + r.high / 2.0
             ahead = to_whole((cx - fx) * to_real(dx) + (cy - fy) * to_real(dy))
@@ -1511,11 +1596,41 @@ define node_name_of(node: Node) -> text:
 #
 # It is also what a screen reader wants, and the two should never be two
 # different orders.
+# The layer each node ends up on: its own if it says one, its parent's
+# otherwise. Painting has always worked this way - `told_within` carries the
+# layer down - and the ring has to agree with it. Without that a dialog
+# opens and Tab keeps walking the page behind it, which is the one thing a
+# modal must not do: you cannot see where the ring went, and Enter presses
+# something you are not looking at.
+define layers_of(doc: SemanticDocument) -> [number]:
+    if length(doc.nodes) is 0:
+        return []
+    layers_from(doc, doc.root, 0, filled(length(doc.nodes), 0))
+
+define layers_from(doc: SemanticDocument, node_id: number, inherited: number, into: [number]) -> [number]:
+    node = doc.nodes[node_id]
+    mine = if node_layer(node) > inherited then node_layer(node) else inherited
+    edit out = set(into, node_id, mine)
+    loop k in node.children:
+        out = layers_from(doc, k, mine, out)
+    out
+
+# The topmost layer anything actually sits on. Everything below it is behind
+# whatever is open, and the ring stays out of it.
+define top_layer(levels: [number]) -> number:
+    edit high = 0
+    loop l in levels:
+        if l > high:
+            high = l
+    high
+
 public define reading_order(doc: SemanticDocument, placed: [Measured]) -> [text]:
+    levels = layers_of(doc)
+    top = top_layer(levels)
     edit rows = []
     loop m in placed:
         node = doc.nodes[m.node_id]
-        if node_do(node) is not "" and m.rect.wide > 0.0 and m.rect.high > 0.0:
+        if node_do(node) is not "" and m.rect.wide > 0.0 and m.rect.high > 0.0 and levels[m.node_id] is top:
             rows = append(rows, m)
     edit out = []
     edit taken = []
@@ -1541,6 +1656,81 @@ public define reading_order(doc: SemanticDocument, placed: [Measured]) -> [text]
         out = append(out, kept(node_do(doc.nodes[rows[best].node_id])))
     out
 
+# --- zones ------------------------------------------------------------------
+#
+# A game screen is eight panels, not one long ring. The stick should walk
+# WITHIN the bags; the shoulder buttons should move to the map. That is how
+# every console UI has worked since consoles had one, and a flat ring through
+# a hundred controls is why the ones that skip it feel broken.
+#
+# A zone is a prop that everything inside inherits, exactly the way a layer
+# is: `p("zone", "bags")` on the panel, and the whole panel is the bags. A
+# screen that says nothing has one zone called "" - and then none of this
+# changes anything, which is why it can be the default.
+#
+# The ring MOVING is zone-bound; Tab is not. An arrow or a stick means "the
+# next thing over there", and there is nothing over there once the panel ends.
+# Tab means "the next thing on this screen", and it always has.
+
+define zones_of(doc: SemanticDocument) -> [text]:
+    if length(doc.nodes) is 0:
+        return []
+    edit blank = []
+    loop _i in 0 until length(doc.nodes):
+        blank = append(blank, "")
+    zones_from(doc, doc.root, "", blank)
+
+define zones_from(doc: SemanticDocument, node_id: number, inherited: text, into: [text]) -> [text]:
+    node = doc.nodes[node_id]
+    said = prop_val(node, "zone")
+    mine = if said is not "" then said else inherited
+    edit out = set(into, node_id, mine)
+    loop k in node.children:
+        out = zones_from(doc, k, mine, out)
+    out
+
+# Which zone the thing called `name` is in, "" when the screen has none.
+public define zone_of(doc: SemanticDocument, name: text) -> text:
+    zones = zones_of(doc)
+    edit found = ""
+    loop i in 0 until length(doc.nodes):
+        if node_name(doc.nodes[i]) is name:
+            found = zones[i]
+    found
+
+# Every zone that has something to focus in it, in reading order - so a
+# shoulder button can walk them in the order the eye would.
+public define zone_names(doc: SemanticDocument, placed: [Measured]) -> [text]:
+    zones = zones_of(doc)
+    order = reading_order(doc, placed)
+    edit out = []
+    loop name in order:
+        z = zone_at(doc, zones, name)
+        edit seen = false
+        loop had in out:
+            if had is z:
+                seen = true
+        if not seen:
+            out = append(out, kept(z))
+    out
+
+define zone_at(doc: SemanticDocument, zones: [text], name: text) -> text:
+    edit found = ""
+    loop i in 0 until length(doc.nodes):
+        if node_name(doc.nodes[i]) is name:
+            found = zones[i]
+    found
+
+# Reading order inside one zone. What the ring walks when a panel has it,
+# and where it lands when a panel is entered: the first of these.
+public define reading_order_in(doc: SemanticDocument, placed: [Measured], zone: text) -> [text]:
+    zones = zones_of(doc)
+    edit out = []
+    loop name in reading_order(doc, placed):
+        if zone_at(doc, zones, name) is zone:
+            out = append(out, name)
+    out
+
 # What a node should be CALLED when it is read out, which is not always
 # what it shows: an icon button shows nothing to read, and a chevron shows
 # nothing useful. `says:` is that name. It falls back to the words the
@@ -1562,6 +1752,105 @@ public define rect_of(doc: SemanticDocument, placed: [Measured], name: text) -> 
         if node_name(doc.nodes[m.node_id]) is name:
             found = m.rect
     found
+
+
+# --- keeping the ring in sight ----------------------------------------------
+#
+# Walking a list with a pad or the arrow keys walks past the bottom of the box
+# within three steps, and then the ring is on something nobody can see - which
+# is worse than not moving at all.
+#
+# veil answers WHERE the box should be. The app owns the number, the way it
+# owns every other piece of state: write the answer back into the same
+# `scroll_y` the box already reads, and the next frame is in the right place.
+# Nothing here reaches into the document or remembers anything.
+
+define parent_of(doc: SemanticDocument, child: number) -> number:
+    edit found = 0 - 1
+    loop i in 0 until length(doc.nodes):
+        loop k in doc.nodes[i].children:
+            if k is child:
+                found = i
+    found
+
+define id_named(doc: SemanticDocument, name: text) -> number:
+    edit found = 0 - 1
+    loop i in 0 until length(doc.nodes):
+        if node_name(doc.nodes[i]) is name:
+            found = i
+    found
+
+# The nearest box above `name` that scrolls, by name - "" when nothing above
+# it does. That is also how an app asks "is this thing even in a list?".
+public define scroller_of(doc: SemanticDocument, name: text) -> text:
+    edit at = parent_of(doc, id_named(doc, name))
+    loop:
+        if at < 0:
+            break
+        if node_rolls(doc.nodes[at]) and node_name(doc.nodes[at]) is not "":
+            return node_name(doc.nodes[at])
+        at = parent_of(doc, at)
+    ""
+
+# How far that box has to be scrolled for `name` to sit wholly inside it, in
+# the app's own numbers - the same ones it wrote into `scroll_y`.
+#
+# Something already in view answers with the scroll the box has NOW, so an
+# app can write the answer back every frame without first asking whether it
+# needed to. A `margin` of a row or two keeps the ring off the very edge,
+# which is what makes a list feel like it is being read rather than paged.
+public define scroll_to_show(doc: SemanticDocument, placed: [Measured], name: text, margin: number) -> number:
+    box_name = scroller_of(doc, name)
+    if box_name is "":
+        return 0
+    box_id = id_named(doc, box_name)
+    me = id_named(doc, name)
+    if box_id < 0 or me < 0:
+        return 0
+    now = prop_int(doc.nodes[box_id], "scroll_y", 0)
+    box = placed[box_id].rect
+    mine = placed[me].rect
+    edge = big(margin, scale_now())
+    # Above the top, or below the bottom. Both are measured in placed pixels
+    # and handed back in the app's, because the app is what reads them.
+    above = to_whole(box.y) + edge - to_whole(mine.y)
+    below = to_whole(mine.y + mine.high) + edge - to_whole(box.y + box.high)
+    at_scale = scale_now()
+    if above > 0:
+        return now - un_big(above, at_scale)
+    if below > 0:
+        return now + un_big(below, at_scale)
+    now
+
+# A length in placed pixels, back in the numbers the app writes.
+define un_big(v: number, at_scale: number) -> number:
+    if at_scale is 100 then v else (v * 100 + at_scale // 2) // at_scale
+
+# How long the list in a scrolling box actually is, and how much of it shows.
+# A stick that scrolls needs both, and so does anything that wants to say
+# "page down" - the scrollbar has been working them out privately since the
+# day it was written.
+public define content_reach(doc: SemanticDocument, placed: [Measured], name: text) -> number:
+    id = id_named(doc, name)
+    if id < 0:
+        return 0
+    content_below(doc, placed, id, placed[id].rect)
+
+public define content_seen(doc: SemanticDocument, placed: [Measured], name: text) -> number:
+    id = id_named(doc, name)
+    if id < 0:
+        return 0
+    to_whole(placed[id].rect.high)
+
+# Scrolling by hand: a stick pushed this far moves the box this many pixels.
+# Sixteen a frame at full push is a page a second, which is the speed a
+# thumb expects - fast enough to cross a long list, slow enough to stop on
+# a row. Below the dead zone nothing moves at all.
+public define scroll_by_stick(now: number, push: number, reach: number, seen: number) -> number:
+    step = to_whole(push * 16.0)
+    want = now + step
+    most = if reach > seen then reach - seen else 0
+    if want < 0 then 0 else if want > most then most else want
 
 public define resolve(doc: SemanticDocument, theme: Theme, face: Font) -> DisplayList:
     paint(doc, theme, face, layout(doc, theme, face))
@@ -1591,7 +1880,7 @@ define paint_told(doc: SemanticDocument, theme: Theme, face: Font, measured: [Me
     loop i in 0 until n:
         starts = append(starts, 0)
         ends = append(ends, 0)
-    told_within(doc, theme, face, measured, doc.root, empty_list(), 0, 0, 100, no_clip(), 0, "", before, steady, starts, ends)
+    told_within(doc, theme, face, measured, doc.root, empty_list(), 0, 0, 100, screen_of(doc, measured), 0, "", before, steady, starts, ends)
 
 # The same walk `paint_within` does, carrying the spans - and turning back
 # at the top of any branch it can copy whole.
@@ -1617,10 +1906,13 @@ define told_within(doc: SemanticDocument, theme: Theme, face: Font, measured: [M
         return Painted{list: copied, from_cmd: after.from_cmd, to_cmd: after.to_cmd}
     ours = if node_name(node) is not "" then node_name(node) else whose
     mine = if node_layer(node) > inherited then node_layer(node) else inherited
+    mine_rect = measured[node_id].rect
+    # The same as in paint_within, for the same reason.
+    if hidden_by(mine_rect, room):
+        return Painted{list: into, from_cmd: set(starts, node_id, began), to_cmd: set(ends, node_id, began)}
     mist = dim * prop_int(node, "fade", 100) // 100
     edit list = if mine is want then paint_one(doc, theme, face, measured, node_id, into, mist, ours) else into
     clipping = node_clips(node) and mine is want
-    mine_rect = measured[node_id].rect
     mine_rad = if clipping then node_radius(node, style_of(theme, node), scale_now()) else 0
     cut_to = if clipping then both_of(mine_rect, room) else room
     if clipping:
@@ -1664,7 +1956,7 @@ define paint_spans(doc: SemanticDocument, theme: Theme, face: Font, measured: [M
         ends = append(ends, 0)
     if n is 0 or highest_layer(doc) > 0:
         return Painted{list: paint(doc, theme, face, measured), from_cmd: starts, to_cmd: ends}
-    told_within(doc, theme, face, measured, doc.root, empty_list(), 0, 0, 100, no_clip(), 0, "", Frame{doc: doc, sizes: Sizes{box: [], wraps: [], styles: []}, placed: measured, list: empty_list(), room: no_clip(), from_cmd: [], to_cmd: [], dress: theme}, starts, starts, ends)
+    told_within(doc, theme, face, measured, doc.root, empty_list(), 0, 0, 100, screen_of(doc, measured), 0, "", Frame{doc: doc, sizes: Sizes{box: [], wraps: [], styles: []}, placed: measured, list: empty_list(), room: no_clip(), from_cmd: [], to_cmd: [], dress: theme}, starts, starts, ends)
 
 define paint(doc: SemanticDocument, theme: Theme, face: Font, measured: [Measured]) -> DisplayList:
     # An empty document has no root to start from - `root` is still 0.
@@ -1698,7 +1990,7 @@ define paint_layer(doc: SemanticDocument, theme: Theme, face: Font, measured: [M
 # is not the same thing: the shadows, the borders and the text have to go
 # together or the panel comes apart on its way out.
 define paint_faded(doc: SemanticDocument, theme: Theme, face: Font, measured: [Measured], node_id: number, into: DisplayList, want: number, inherited: number, dim: number) -> DisplayList:
-    paint_within(doc, theme, face, measured, node_id, into, want, inherited, dim, no_clip(), 0, "")
+    paint_within(doc, theme, face, measured, node_id, into, want, inherited, dim, screen_of(doc, measured), 0, "")
 
 # A clipping box, when it is done, has to give back the clip it was
 # INSIDE - not turn clipping off. Turning it off let everything painted
@@ -1714,10 +2006,25 @@ define paint_within(doc: SemanticDocument, theme: Theme, face: Font, measured: [
     # inside a named thing moves with it.
     ours = if node_name(node) is not "" then node_name(node) else whose
     mine = if node_layer(node) > inherited then node_layer(node) else inherited
+    mine_rect = measured[node_id].rect
+    # Nothing outside the clip can be seen, so nothing outside it is drawn -
+    # and neither is anything inside it. A list of twenty thousand rows in a
+    # box that shows thirty-three sent twenty thousand draw commands to the
+    # painter, all but thirty-three to be thrown away by a scissor test on
+    # the other side.
+    #
+    # A box with NO SIZE is not outside anything: a group that measures zero
+    # can still hold a dialog, so it is walked.
+    #
+    # What this does mean is that a subtree scrolled out of view raises
+    # nothing either - a menu opened from a row that has since scrolled away
+    # is gone with the row. That is what every toolkit does and what the eye
+    # expects.
+    if hidden_by(mine_rect, room):
+        return into
     mist = dim * prop_int(node, "fade", 100) // 100
     edit list = if mine is want then paint_one(doc, theme, face, measured, node_id, into, mist, ours) else into
     clipping = node_clips(node) and mine is want
-    mine_rect = measured[node_id].rect
     # Only a box that CLIPS needs to know how round it is, and few do - but
     # this worked it out for every node on the screen, and working it out
     # means finding the node's rule in the theme, which is a walk down
@@ -1810,6 +2117,14 @@ define arriving(who: text, what: text, colour: text) -> text:
 # around it.
 # Two clips at once: what is inside both. `no_clip` on either side means
 # that side is not asking for anything.
+# Is this box entirely outside what can be seen? A box with no size answers
+# no: it is not outside anything, it is simply not a box.
+define hidden_by(what: Rect, room: Rect) -> truth:
+    if what.wide <= 0.0 or what.high <= 0.0:
+        return false
+    seen = both_of(what, room)
+    seen.wide <= 0.0 or seen.high <= 0.0
+
 define both_of(a: Rect, b: Rect) -> Rect:
     if b.wide < 0.0 or b.high < 0.0:
         return a
@@ -1820,6 +2135,16 @@ define both_of(a: Rect, b: Rect) -> Rect:
     x1 = if a.x + a.wide < b.x + b.wide then a.x + a.wide else b.x + b.wide
     y1 = if a.y + a.high < b.y + b.high then a.y + a.high else b.y + b.high
     Rect{x: x0, y: y0, wide: if x1 > x0 then x1 - x0 else 0.0, high: if y1 > y0 then y1 - y0 else 0.0}
+
+# What the whole frame can see. Painting starts here rather than at "no clip
+# at all", so anything that ended up off the screen is thrown away at the top
+# of the walk instead of being handed to the painter to discard. It matters
+# for exactly the things that are placed at a point rather than in the flow -
+# three hundred nameplates of which sixty are in front of you.
+define screen_of(doc: SemanticDocument, measured: [Measured]) -> Rect:
+    if length(measured) is 0 or doc.root >= length(measured):
+        return no_clip()
+    measured[doc.root].rect
 
 define no_clip() -> Rect:
     Rect{x: 0.0, y: 0.0, wide: 0.0 - 1.0, high: 0.0 - 1.0}
@@ -2008,6 +2333,37 @@ define push_marks(list: DisplayList, lines: [text], r: Rect, pad: number, size: 
             out = push_cmd(out, DrawRect(plate, "#2f5aa8ff", src))
         seen = seen + len_of + 1
         n = n + 1
+    # --- text on its way in -------------------------------------------------
+    #
+    # Typing Japanese means typing "nihon" and getting a choice of ways to
+    # write it; the letters on their way to becoming a word are UNDERLINED
+    # while they are still undecided. Without that the field looks like it
+    # already accepted them, and there is no way to see what the next key
+    # will replace.
+    #
+    # The composing text sits in the node's own text, so it measures and
+    # wraps like everything else; `compose_from` and `compose_to` are byte
+    # offsets into it, the same as `caret` and `anchor`. The platform is
+    # what knows a composition is happening - Windows says so with its IME
+    # messages, a browser with compositionstart - so the app carries the
+    # two numbers across and veil draws the line.
+    c_from = prop_int(node, "compose_from", 0 - 1)
+    c_to = prop_int(node, "compose_to", 0 - 1)
+    if c_from >= 0 and c_to > c_from:
+        edit under_seen = 0
+        edit under_n = 0
+        loop line in lines:
+            ub = bytes_of(line)
+            u_len = bytes_count(ub)
+            u_lo = if c_from - under_seen < 0 then 0 else if c_from - under_seen > u_len then u_len else c_from - under_seen
+            u_hi = if c_to - under_seen < 0 then 0 else if c_to - under_seen > u_len then u_len else c_to - under_seen
+            if u_hi > u_lo:
+                ux0 = to_real(text_size(text_of(bytes_part(ub, 0, to_whole(u_lo))), size, face).wide)
+                ux1 = to_real(text_size(text_of(bytes_part(ub, 0, to_whole(u_hi))), size, face).wide)
+                rule = Rect{x: r.x + to_real(pad) + ux0, y: r.y + to_real(pad + under_n * lh + lh) - 2.0, wide: ux1 - ux0, high: 1.0}
+                out = push_cmd(out, DrawRect(rule, "#f2f2f2ff", src))
+            under_seen = under_seen + u_len + 1
+            under_n = under_n + 1
     # The caret itself, on the line it belongs to, and only when it is lit
     # - a caret that never blinks reads as a stuck one.
     if lit:
@@ -2133,6 +2489,58 @@ define pick_layer(doc: SemanticDocument, theme: Theme, measured: [Measured], nod
         if node_shown(doc.nodes[k]):
             best = pick_layer(doc, theme, measured, k, x, y, best, want, mine)
     best
+
+# --- who gets the input -----------------------------------------------------
+#
+# A game has to ask three questions before it acts on anything, and it has to
+# ask them of the UI, because the UI is on top:
+#
+#     if not over_ui(doc, dress, placed, mx, my):
+#         shoot()
+#     if not taking_keys(doc):
+#         move(w, a, s, d)
+#     if not holding_pad(doc):
+#         swing_camera(rx, ry)
+#
+# Getting this wrong is the oldest bug in games with UI: you click a button
+# and your character shoots the wall behind it, or you type "west" in chat
+# and walk west. Every one of the three is derived from the document that is
+# already on screen, so none of them can drift out of step with what is drawn.
+
+# Is the pointer over anything the UI drew? Not just over something you can
+# press - a panel is as solid as a button, and a click on the middle of a
+# window is not a click on the world. Nodes marked `pass: 1` are see-through
+# to the pointer and so is empty space between things.
+public define over_ui(doc: SemanticDocument, theme: Theme, placed: [Measured], x: number, y: number) -> truth:
+    pick_placed(doc, theme, placed, x, y) is not ""
+
+# Is somebody typing? A field with a caret in it has the keyboard, and WASD
+# means four letters until it does not.
+public define taking_keys(doc: SemanticDocument) -> truth:
+    if length(doc.nodes) is 0:
+        return false
+    typing_below(doc, doc.root)
+
+# Down the TREE, not along the array. The array is storage - it can hold a
+# branch that was built and then not used, and a field nobody put on the
+# screen is not a field anybody is typing in.
+define typing_below(doc: SemanticDocument, node_id: number) -> truth:
+    node = doc.nodes[node_id]
+    if not node_shown(node):
+        return false
+    if prop_int(node, "caret", 0 - 1) >= 0:
+        return true
+    edit found = false
+    loop k in node.children:
+        if typing_below(doc, k):
+            found = true
+    found
+
+# Is the UI holding the controller? Anything on a raised layer - a dialog, a
+# menu, an inventory over the world - means the stick is driving the ring and
+# not the camera. A screen with nothing raised leaves the pad to the game.
+public define holding_pad(doc: SemanticDocument) -> truth:
+    highest_layer(doc) > 0
 
 # Hit-test against the host-box layout (see layout_in). -1 = miss.
 define pick_id_walk(doc: SemanticDocument, measured: [Measured], node_id: number, x: number, y: number, so_far: number) -> number:
