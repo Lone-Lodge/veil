@@ -1,0 +1,41 @@
+# The gates, on a machine that is not the author's laptop.
+#
+# Manual only: run it from the Actions tab, or `gh workflow run green`.
+#
+# veil is written in Orion, so the job builds Orion first, from its committed
+# seed. gates.sh then runs the check suite, builds the wasm gallery, and
+# validates that every import the module asks for is one the page supplies.
+
+name: green
+
+on: workflow_dispatch
+
+jobs:
+  gates:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: veil
+
+      - uses: actions/checkout@v5
+        with:
+          repository: Lone-Lodge/orion
+          path: orion
+
+      - name: bootstrap orion
+        run: cd orion && bash tools/bootstrap.sh
+
+      - name: gates
+        run: cd veil && PATH="$PWD/../orion/dist:$PATH" bash tools/gates.sh

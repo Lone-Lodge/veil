@@ -1,7 +1,7 @@
-# veil_theme — design system as data.
+# veil_theme - design system as data.
 #
 # A theme is a flat list of (role, style) entries. The resolver
-# walks it deterministically — order matters, last-write wins.
+# walks it deterministically - order matters, last-write wins.
 
 
 # radius: corner rounding in px, 0 = square. size: text size in px, 0 =

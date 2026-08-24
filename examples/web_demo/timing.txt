@@ -1,2 +1,0 @@
-veil gallery, in a browser
-  page: http://localhost:7800

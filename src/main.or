@@ -1,4 +1,4 @@
-# Veil — the check suite.
+# Veil - the check suite.
 #
 # This file used to PRINT its results: 24 lines of the shape
 #
@@ -77,7 +77,7 @@ define section(name: text):
     print_line("{name}")
 
 define main() -> number:
-    print_line("Veil — pure Orion · check suite")
+    print_line("Veil - pure Orion · check suite")
     print_line("version: 0.0.1")
 
     face = font_body()
@@ -97,7 +97,7 @@ define main() -> number:
     moved = move_selection(inv, 2)
     check("inventory selection moves", 2, moved.selected_index)
     check("button scene has one root node", 1, scene_nodes(button_scene()))
-    # `display_list_json` wraps the commands in `{"commands":[…]}`, so an empty
+    # `display_list_json` wraps the commands in `{"commands":[...]}`, so an empty
     # document renders the envelope with an empty array. (The old code printed
     # this string and asserted nothing about it.)
     check_text("an empty doc renders an empty command list", "\{\"commands\":[]\}", render(empty_doc(), web_theme))
@@ -134,7 +134,7 @@ define main() -> number:
     # A panel with 3 heading children: 4 commands (panel rect, 3 heading
     # texts - an empty text prop draws NOTHING now, it used to emit an
     # empty DrawText). Two-pass layout stacks the headings tightly from
-    # y=32 — h1 [32,48], h2 [60,76], h3 [88,104] — so (35,40) is the
+    # y=32 - h1 [32,48], h2 [60,76], h3 [88,104] - so (35,40) is the
     # first and (35,96) the third.
     section("tree resolver")
     st = stack_scene()
@@ -202,10 +202,10 @@ define main() -> number:
     gm = layout(SemanticDocument{root: 0, nodes: [gpanel, gkid]}, dt, face)
     check("grow fills the inner height", 168, gm[1].rect.high)
 
-    # A per-node `pad:` overrides the role's theme padding — the reconciliation
+    # A per-node `pad:` overrides the role's theme padding - the reconciliation
     # that lets ONE resolver serve Atlas (per-entity props) and Veil-web
     # (per-role theme). Role "text" has pad 0, so pad "20" makes the "x" box
-    # 7 + 20*2 = 47 wide (7 = Inter's x advance at the 13px body default —
+    # 7 + 20*2 = 47 wide (7 = Inter's x advance at the 13px body default -
     # measurement reads the REAL face now, not the old 8px monospace guess).
     section("per-node style override")
     pnode = Node{role: role("text"), props: [NodeProp{key: "text", content: "x"}, NodeProp{key: "pad", content: "20"}], children: []}
@@ -1051,7 +1051,7 @@ define itag(i: Interaction) -> text:
         Scroll(_) then "scroll"
 
 # The scalar payload of a non-pointer intent (key code / scroll delta), or the
-# x pixel of a pointer one — the axis `classify` documents for `x`.
+# x pixel of a pointer one - the axis `classify` documents for `x`.
 define iscalar(i: Interaction) -> number:
     choose i:
         PressAt(x, _) then x

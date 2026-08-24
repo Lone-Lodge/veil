@@ -1,4 +1,4 @@
-# veil_role — semantic labels.
+# veil_role - semantic labels.
 #
 # Open + extensible: a role is just a string, looked up in the
 # theme. No closed enum; user themes add roles freely.

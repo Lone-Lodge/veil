@@ -1,16 +1,16 @@
-# veil_inventory — feature-showcase demo.
+# veil_inventory - feature-showcase demo.
 #
 # Rust kept this at 690 lines. The Orion port focuses on the DATA
-# the demo authors — items, columns, filters — and lets the resolver
+# the demo authors - items, columns, filters - and lets the resolver
 # render them through the same Veil pipeline as everything else.
 #
 # Exercises scroll areas + scrollbar, right-click context menu,
-# hover/focus/press, selection, and keyboard navigation — all on a
+# hover/focus/press, selection, and keyboard navigation - all on a
 # pure Document IR.
 
 
 # One inventory entry. Quantity is `0...9999` so the compiler packs
-# it as `u16` (range types, §8) — 65× less RAM for big inventories
+# it as `u16` (range types, §8) - 65× less RAM for big inventories
 # than a Rust BTreeMap of i64s.
 public type Item: name: text, quantity: 0...9999, rarity: text, weight_grams: number
 
@@ -19,7 +19,7 @@ public type Inventory: items: [Item], selected_index: number
 public define empty_inventory() -> Inventory:
     Inventory{items: [], selected_index: 0}
 
-# Build the demo's canonical item list — 5 entries that exercise the
+# Build the demo's canonical item list - 5 entries that exercise the
 # rarity colours + scroll behaviour without flooding the layout.
 public define demo_inventory() -> Inventory:
     Inventory{items: [Item{name: "Sword of dawn", quantity: 1, rarity: "epic", weight_grams: 1800}, Item{name: "Health potion", quantity: 12, rarity: "common", weight_grams: 50}, Item{name: "Map fragment", quantity: 3, rarity: "rare", weight_grams: 5}, Item{name: "Iron ore", quantity: 47, rarity: "common", weight_grams: 200}, Item{name: "Phoenix feather", quantity: 1, rarity: "legendary", weight_grams: 1}], selected_index: 0}

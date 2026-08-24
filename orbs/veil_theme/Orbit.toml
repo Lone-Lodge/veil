@@ -1,6 +1,6 @@
 name = "veil_theme"
 version = "0.0.1"
-description = "Veil — design system as data (role → style)"
+description = "Veil - design system as data (role → style)"
 
 [orbs]
 veil_role = "path:../veil_role"

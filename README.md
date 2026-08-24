@@ -341,3 +341,8 @@ itself on a machine without webgl2.
   anything outside the clip. Worth knowing and not worth fixing: a whole told
   frame is 0.4 ms in a hidden tab and 0.2 at best, and painting is a fraction
   of that.
+
+## License
+
+Apache 2.0. Copyright 2026 Lone Lodge. See [LICENSE](LICENSE) and
+[NOTICE](NOTICE).

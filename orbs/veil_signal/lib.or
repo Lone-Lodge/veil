@@ -1,12 +1,12 @@
-# veil_signal — fine-grained reactivity.
+# veil_signal - fine-grained reactivity.
 #
 # A signal is an id-addressed cell in a store; a write marks it dirty.
 # Reactivity here is PULL-based: a consumer re-derives its view when the
-# store `any_dirty`, then `clear_dirty`. The dirty set IS the notification —
+# store `any_dirty`, then `clear_dirty`. The dirty set IS the notification -
 # no subscribe/notify bookkeeping, no Arc<RwLock> dance. This matches the
 # engine's when-rule dirty gating: nothing recomputes while nothing changed.
 
-# One reactive int cell. `dirty` is set on creation and every write, cleared
+# One reactive number cell. `dirty` is set on creation and every write, cleared
 # by clear_dirty once a derivation has consumed it.
 public type IntCell: id: number, value: number, dirty: truth
 
@@ -16,7 +16,7 @@ public type SignalStore: cells: [IntCell], next_id: number
 public define empty_store() -> SignalStore:
     SignalStore{cells: [], next_id: 1}
 
-# Allocating a signal grows the store AND yields the new id — paired so the
+# Allocating a signal grows the store AND yields the new id - paired so the
 # caller threads both and derivation stays pure.
 public type SignalAlloc: store: SignalStore, id: number
 
@@ -26,7 +26,7 @@ public define signal_int(store: SignalStore, initial: number) -> SignalAlloc:
     SignalAlloc{store: SignalStore{cells: append(store.cells, cell), next_id: id + 1}, id: id}
 
 # Read a signal by id. Missing id reads 0 (a signal that was never allocated
-# is indistinguishable from one holding 0 — the graceful default).
+# is indistinguishable from one holding 0 - the graceful default).
 public define signal_get(store: SignalStore, id: number) -> number:
     edit found = 0
     loop cell in store.cells:
@@ -44,7 +44,7 @@ public define signal_set(store: SignalStore, id: number, new_value: number) -> S
             out = append(out, cell)
     SignalStore{cells: out, next_id: store.next_id}
 
-# Any cell changed since the last clear? — the re-derive gate.
+# Any cell changed since the last clear? - the re-derive gate.
 public define any_dirty(store: SignalStore) -> truth:
     edit d = false
     loop cell in store.cells:

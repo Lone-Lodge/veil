@@ -317,7 +317,7 @@ define push_box(list: DisplayList, r: Rect, colour: text, corners: text, src: nu
 define align_factor(a: text) -> number:
     if a is "center" then 500 else if a is "end" then 1000 else 0
 
-# Parse a non-negative int from a prop string (digit bytes only).
+# Parse a non-negative number from a prop string (digit bytes only).
 # The whole number written in a text, ignoring everything that is not a
 # digit. A document says its numbers in text, and so does an app reading
 # back the `do:` names it wrote - one reading for both.

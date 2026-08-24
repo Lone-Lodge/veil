@@ -1,7 +1,7 @@
-# veil_measure — layout computation.
+# veil_measure - layout computation.
 
 
-# A measured node — final pixel rect after layout pass.
+# A measured node - final pixel rect after layout pass.
 
 use typeface
 use ori_geometry
@@ -10,7 +10,7 @@ use text
 public type Measured: node_id: number, rect: Rect
 
 # Real text metrics: the line measured by the shared engine face
-# (typeface — the same TTF advances every renderer draws with), width
+# (typeface - the same TTF advances every renderer draws with), width
 # from the font's own advance widths at `size_px`, height = the em box
 # (ascent + descent). Resolver, pick and painters all read THIS, so
 # the pixel measured and the pixel drawn come from one engine.

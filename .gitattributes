@@ -1,0 +1,10 @@
+# LF everywhere. A CRLF checkout once poisoned the editor.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.ttf binary
+*.exe binary
+*.dll binary
+*.wasm binary

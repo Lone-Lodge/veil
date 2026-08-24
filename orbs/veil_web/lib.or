@@ -1,8 +1,8 @@
-# veil_web — browser backend for Veil.
+# veil_web - browser backend for Veil.
 #
 # The honest test of the load-bearing platform claim: veil-core runs
 # unchanged in the browser, and a renderer needs only the resolved
-# tree. The DisplayList travels as JSON — over a websocket today
+# tree. The DisplayList travels as JSON - over a websocket today
 # (thin-client: core runs in the local process, the browser is a
 # dumb canvas), out of wasm linear memory tomorrow. Same contract.
 
@@ -86,7 +86,7 @@ define icon_json(p: Point, icon: text, size: number, colour: text, src: number) 
     "\{\"kind\":\"icon\",\"x\":{p.x},\"y\":{p.y},\"size\":{size},\"src\":{src},\"icon\":\"" + icon + "\",\"color\":\"" + colour + "\"\}"
 
 # Generic renderer: document × theme → display list → JSON. The
-# whole web painter sits behind this one fn — no widget classes,
+# whole web painter sits behind this one fn - no widget classes,
 # no DOM, just data.
 public define render(doc: SemanticDocument, theme: Theme) -> text:
     list = resolve(doc, theme, font_body())

@@ -45,7 +45,7 @@ define tk_lookup(tokens: [TokenRef], name: text) -> text:
             out = t.literal
     out
 
-# Resolve a colour value: a literal ("#…") passes through; a token name is
+# Resolve a colour value: a literal ("#...") passes through; a token name is
 # chased (its value may name another token) until a literal or a miss (the raw
 # value returned). A cycle guard caps the chase.
 public define resolve_token(tokens: [TokenRef], value: text) -> text:

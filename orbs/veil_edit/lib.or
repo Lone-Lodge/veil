@@ -1,7 +1,7 @@
 # veil_edit - a line of text you can edit, and where the caret is in it.
 #
 # Both apps that needed a text field wrote the same thing from scratch: a
-# codepoint-to-text table because Orion cannot make a byte from an int, a
+# codepoint-to-text table because Orion cannot make a byte from a number, a
 # backspace that walks back over UTF-8 continuation bytes, and an append
 # that could only ever add at the end. Same code twice, and neither could
 # put the caret anywhere but after the last letter.
@@ -25,7 +25,7 @@ public define edit_new(t: text) -> Edit:
     Edit{content: t, caret: n, anchor: n}
 
 # The characters a field accepts, as one string. Orion has no "make a byte
-# from an int", so the alphabet has to exist as text and a typed code is
+# from a number", so the alphabet has to exist as text and a typed code is
 # found by its position in it. ASCII 32..126 is one byte each; the six
 # Swedish letters after it are two.
 define alphabet() -> text:

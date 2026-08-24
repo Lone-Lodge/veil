@@ -1,7 +1,7 @@
-# design-tokens — the atlas-wide palette + spacing scale.
+# design-tokens - the atlas-wide palette + spacing scale.
 #
 # `tokens NS: key: value` blocks register as slot resources at boot
-# (project_load_tokens). Widgets consume via `color: X` / `style: X` —
+# (project_load_tokens). Widgets consume via `color: X` / `style: X` -
 # the resolver chases refs, so `bg: surface` → `color:surface` → hex.
 #
 # Palette leans warm-ember (matches Lone Lodge / fireplace-signal DNA)

@@ -1,6 +1,6 @@
 name = "veil_web"
 version = "0.0.1"
-description = "Veil — browser backend (generic renderer + JSON display list)"
+description = "Veil - browser backend (generic renderer + JSON display list)"
 
 [orbs]
 ori_display = "path:../../../orion/orbs/ori_display"
