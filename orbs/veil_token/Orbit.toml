@@ -1,5 +1,5 @@
 name = "veil_token"
-version = "0.0.1"
+version = "0.1.0"
 description = "Veil - primitive design tokens (no margins; gap/pad only)"
 
 [orbs]

@@ -1,6 +1,6 @@
 name = "veil_edit"
-version = "0.0.1"
+version = "0.1.0"
 description = "Veil - one line of editable text, and where the caret is in it"
 
 [orbs]
-text = "path:../../../orion/orbs/text"
+text = "*"

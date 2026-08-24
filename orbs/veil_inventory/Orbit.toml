@@ -1,5 +1,5 @@
 name = "veil_inventory"
-version = "0.0.1"
+version = "0.1.0"
 description = "Veil - inventory demo (scroll, context menu, hover/focus/selection, keyboard nav)"
 
 [orbs]

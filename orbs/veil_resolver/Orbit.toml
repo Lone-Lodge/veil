@@ -1,12 +1,12 @@
 name = "veil_resolver"
-version = "0.0.1"
+version = "0.1.0"
 description = "Veil - deterministic explainable inspectable resolver"
 
 [orbs]
 veil_document = "path:../veil_document"
 veil_theme = "path:../veil_theme"
-ori_display = "path:../../../orion/orbs/ori_display"
-ori_geometry = "path:../../../orion/orbs/ori_geometry"
+ori_display = "*"
+ori_geometry = "*"
 veil_measure = "path:../veil_measure"
 veil_motion = "path:../veil_motion"
 bytes = "*"

@@ -1,7 +1,7 @@
 name = "veil_document"
-version = "0.0.1"
+version = "0.1.0"
 description = "Veil - SemanticDocument: the IR a UI declares"
 
 [orbs]
 veil_role = "path:../veil_role"
-text = "path:../../../orion/orbs/text"
+text = "*"
