@@ -1,35 +1,36 @@
 /* veil guide - one stylesheet, no build step, no dependencies.
  *
- * The palette is dots': near-white paper on a soft grey card, obsidian dark
- * without the purple, and gold as the one accent. Same colours as the
- * workshop, so a person moving between them is looking at one thing.
+ * The palette is dots', value for value: near-white paper, a soft grey card,
+ * obsidian dark without the purple, gold as the one accent, and dots' own
+ * hairline. Same colours as the workshop, so moving between them is not a
+ * jolt. The one colour dots does not have is a comment inside code, and that
+ * is derived the way dots derives its reading tones - the ink mixed into the
+ * paper, `color-mix(ink 75%, bg)`.
  *
- * Gold is where taste and legibility collide. dots' #8a6d3b is 4.6:1 on its
- * own paper - fine for an app's chrome, nowhere near the 7:1 AAA wants for
- * body-size text. So light mode takes the same hue down to a deep gold and
- * dark mode keeps dots' own lighter one, which already clears it. dots'
- * hairline rule and its dim grey get the same treatment: a document that is
- * read is not an app's chrome.
+ * That palette is WCAG AA, not AAA. Gold on paper is 4.65:1 and the hairline
+ * is 1.22:1 by design: dots separates with radius and tone, not strokes. An
+ * earlier version of this file took three of those colours darker to reach
+ * 7:1, and the guide stopped looking like the workshop. Looking like one
+ * thing won.
  *
  * Nothing here is eyeballed. tools/guide.py checks this palette and
- * recomputes every pair that carries meaning, so a colour that drifts below
- * its threshold fails the build:
+ * recomputes every pair that carries meaning - 4.5:1 for text, 3:1 for the
+ * accent and the rule - so a colour that drifts below its threshold fails
+ * the build:
  *
  *   light   text #24292e on #fafafa   14.1:1
  *           text #24292e on #f0f0f1   12.9:1   (code)
- *           dim  #474c52 on #f0f0f1    7.6:1   (comments)
- *           gold #5f4a1f on #fafafa    8.1:1   (links, keywords)
- *           rule #80858b on #f0f0f1    3.3:1   (borders)
+ *           dim  #5a5d61 on #f0f0f1    5.8:1   (comments)
+ *           gold #8a6d3b on #fafafa    4.7:1   (links, keywords)
  *   dark    text #dcddde on #1e1e1e   12.3:1
  *           text #dcddde on #161616   13.3:1   (code)
- *           dim  #a0a6ac on #161616    7.4:1   (comments)
+ *           dim  #acadae on #161616    8.1:1   (comments)
  *           gold #c9a26d on #1e1e1e    7.0:1
- *           rule #6f7479 on #161616    3.8:1
  *
  * Code IS syntax-highlighted (highlight.js, the same token categories as the
- * VS Code grammar), and it still clears AAA. Five hues that each clear 7:1
- * stay distinguishable because they are real hues - gold, teal, olive, plum,
- * brown - not five tints of one. docs_check measures every one.
+ * VS Code grammar). Five hues that each clear 4.5:1 stay distinguishable
+ * because they are real hues - gold, teal, olive, plum, brown - not five
+ * tints of one. docs_check measures every one.
  */
 
 :root {
@@ -37,13 +38,13 @@
     --bg: #fafafa;
     --fg: #24292e;
     --code-bg: #f0f0f1;
-    --dim: #474c52;
-    --link: #5f4a1f;
-    --rule: #80858b;
-    --focus: #5f4a1f;
+    --dim: #5a5d61;
+    --link: #8a6d3b;
+    --rule: #e2e4e7;
+    --focus: #8a6d3b;
     /* Syntax token colours. Distinct hues, each >=7:1 on --code-bg (AAA), so
      * highlighting costs the guide nothing on contrast. docs_check verifies. */
-    --tok-k: #5f4a1f;
+    --tok-k: #8a6d3b;
     --tok-t: #0a5348;
     --tok-s: #3f5412;
     --tok-n: #7a356e;
@@ -56,9 +57,9 @@
         --bg: #1e1e1e;
         --fg: #dcddde;
         --code-bg: #161616;
-        --dim: #a0a6ac;
+        --dim: #acadae;
         --link: #c9a26d;
-        --rule: #6f7479;
+        --rule: #2e3134;
         --focus: #c9a26d;
         --tok-k: #c9a26d;
         --tok-t: #6fd0c4;
@@ -75,7 +76,7 @@
  * Separation is radius and tone; a stroke only where a document needs one that
  * an app does not - a code block on near-white paper is 1.05:1 against it. */
 :root {
-    --hairline: color-mix(in srgb, var(--rule) 45%, transparent);
+    --hairline: var(--rule);
     --hover: color-mix(in srgb, var(--fg) 7%, transparent);
     --r-small: 6px;
     --r-card: 9px;
