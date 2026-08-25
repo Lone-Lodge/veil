@@ -34,7 +34,7 @@ instead of built from nothing.
 
 ## The smallest app
 
-```orion
+```python
 use veil_document
 use veil_resolver
 use veil_theme
@@ -77,7 +77,7 @@ that word.
 
 ## What a node is
 
-```orion
+```python
 n(role, props, children)     a node
 p(key, content)              one property
 top(nodes)                   the index of the one just appended
@@ -99,7 +99,7 @@ Something hanging in the world: `at_x`, `at_y`, `pin`, `world`, `order`.
 
 ## A list of twenty-four thousand things
 
-```orion
+```python
 win = row_window(24000, 26, 150, at)
 n("well", [p("rows", "24000"), p("row_h", "26"), p("from", "{win.first}"),
            p("h", "150"), p("clip", "1"), p("scrollbar", "1"),
@@ -122,7 +122,7 @@ The same idea one dimension further is a bag: `layout: grid` with `cols`, and
 the items land in the cells their own indices name. Ten thousand slots four
 across, showing forty, is forty nodes and one number.
 
-```orion
+```python
 n("bag", [p("layout", "grid"), p("cols", "8"), p("rows", "10000"),
           p("row_h", "48"), p("from", "{win.first * 8}"), p("clip", "1"),
           p("scrollbar", "1"), p("scroll_y", "{at}")], the_forty)
@@ -135,7 +135,7 @@ nothing.
 
 ## Something hanging in the world
 
-```orion
+```python
 n("plate", [p("at_x", "{sx}"), p("at_y", "{sy}"), p("pin", "above"),
             p("world", "1"), p("order", "{far - dist}")], name_and_bar)
 ```
@@ -229,7 +229,7 @@ button shows a glyph and means "close".
 
 A game has to ask the UI before it acts, because the UI is on top:
 
-```orion
+```python
 if not over_ui(doc, dress, placed, mx, my):
     shoot()
 if not taking_keys(doc):
@@ -290,7 +290,7 @@ cost of a screen is the cost of what you can see on it:
 
 ## Running it
 
-```
+```sh
 bash tools/gates.sh
 ```
 
@@ -301,7 +301,7 @@ while nothing built it.
 
 The gallery itself:
 
-```
+```sh
 bash examples/wasm_gallery/build.sh
 python -m http.server 7801 --directory examples/wasm_gallery
 ```
