@@ -69,6 +69,20 @@
     }
 }
 
+/* dots builds every surface out of three formulas: one hover, one hairline,
+ * one radius scale (6 / 9 / 12). A page is not an app, but it can be made of
+ * the same parts, so moving between the workshop and the guide is not a jolt.
+ * Separation is radius and tone; a stroke only where a document needs one that
+ * an app does not - a code block on near-white paper is 1.05:1 against it. */
+:root {
+    --hairline: color-mix(in srgb, var(--rule) 45%, transparent);
+    --hover: color-mix(in srgb, var(--fg) 7%, transparent);
+    --r-small: 6px;
+    --r-card: 9px;
+    --r-surface: 12px;
+}
+::selection { background: color-mix(in srgb, var(--link) 30%, transparent); }
+
 /* AAA 1.4.12: the reader may override spacing. Everything below is in
  * relative units so nothing collapses when they do, or at 200% zoom. */
 * { box-sizing: border-box; }
@@ -137,8 +151,8 @@ h2 {
     max-width: 42rem;
     margin: 0 auto 2.5rem;
     padding: 1rem 1.25rem 0.5rem;
-    border: 1px solid var(--rule);
-    border-radius: 4px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-card);
 }
 .toc-h {
     border-top: none;
@@ -196,9 +210,9 @@ a {
 
 pre {
     background: var(--code-bg);
-    border: 1px solid var(--rule);
-    border-radius: 4px;
-    padding: 0.875rem 1rem;
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-card);
+    padding: 1rem 1.15rem;
     /* Long lines scroll here rather than forcing the page sideways (1.4.10).
      * Keyboard-reachable so it is not a scroll trap. */
     overflow-x: auto;
@@ -215,8 +229,8 @@ pre code { background: none; padding: 0; }
 /* Inline code needs a hint of a box, not a colour change. */
 :not(pre) > code {
     background: var(--code-bg);
-    border: 1px solid var(--rule);
-    border-radius: 3px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-small);
     padding: 0.05em 0.3em;
 }
 
@@ -273,8 +287,8 @@ pre code { background: none; padding: 0; }
     padding: 0.25em 0.6em;
     color: var(--dim);
     background: var(--bg);
-    border: 1px solid var(--rule);
-    border-radius: 4px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-small);
     cursor: pointer;
     opacity: 0.55;
     transition: opacity 0.12s ease, color 0.12s ease, border-color 0.12s ease;

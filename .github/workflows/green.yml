@@ -1,14 +1,18 @@
 # The gates, on a machine that is not the author's laptop.
 #
-# Manual only: run it from the Actions tab, or `gh workflow run green`.
-#
 # veil is written in Orion, so the job builds Orion first, from its committed
 # seed. gates.sh then runs the check suite, builds the wasm gallery, and
 # validates that every import the module asks for is one the page supplies.
 
 name: green
 
-on: workflow_dispatch
+# Manual for the author: a push does not need a runner to repeat what the gates
+# already said on the machine that made the change. A PULL REQUEST is the other
+# case entirely - it is code nobody here has run yet, so it is proven before it
+# is read.
+on:
+  pull_request:
+  workflow_dispatch:
 
 jobs:
   gates:
