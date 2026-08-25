@@ -1,14 +1,13 @@
 /* veil guide - one stylesheet, no build step, no dependencies.
  *
  * The palette is dots', value for value: near-white paper, a soft grey card,
- * obsidian dark without the purple, gold as the one accent, and dots' own
- * hairline. Same colours as the workshop, so moving between them is not a
+ * obsidian dark without the purple, one soft blue as the accent, and dots'
+ * own hairline. Same colours as the workshop, so moving between them is not a
  * jolt. The one colour dots does not have is a comment inside code, and that
  * is derived the way dots derives its reading tones - the ink mixed into the
  * paper, `color-mix(ink 75%, bg)`.
  *
- * That palette is WCAG AA, not AAA. Gold on paper is 4.65:1 and the hairline
- * is 1.22:1 by design: dots separates with radius and tone, not strokes. An
+ * That palette is WCAG AA, not AAA. The hairline is 1.22:1 by design: dots separates with radius and tone, not strokes. An
  * earlier version of this file took three of those colours darker to reach
  * 7:1, and the guide stopped looking like the workshop. Looking like one
  * thing won.
@@ -20,17 +19,17 @@
  *
  *   light   text #24292e on #fafafa   14.1:1
  *           text #24292e on #f0f0f1   12.9:1   (code)
- *           dim  #5a5d61 on #f0f0f1    5.8:1   (comments)
- *           gold #8a6d3b on #fafafa    4.7:1   (links, keywords)
+ *           dim  #64686b on #f0f0f1    4.9:1   (comments)
+ *           blue #5b7fa6 on #fafafa    4.0:1   (active, never text)
  *   dark    text #dcddde on #1e1e1e   12.3:1
  *           text #dcddde on #161616   13.3:1   (code)
- *           dim  #acadae on #161616    8.1:1   (comments)
- *           gold #c9a26d on #1e1e1e    7.0:1
+ *           dim  #a3a4a4 on #161616    7.2:1   (comments)
+ *           blue #8aa8cc on #1e1e1e    6.8:1
  *
  * Code IS syntax-highlighted (highlight.js, the same token categories as the
- * VS Code grammar), but greyscale plus one muted blue: a reserved word is
- * told apart by WEIGHT, a literal by that blue, a comment by the dim tone.
- * The gold never paints text. the same restraint as the workshop.
+ * VS Code grammar) but greyscale: weight for a reserved word, a lighter ink
+ * for a literal, lighter still for a comment. The accent never paints text.
+ * the same restraint as the workshop.
  */
 
 :root {
@@ -38,21 +37,22 @@
     --bg: #fafafa;
     --fg: #24292e;
     --code-bg: #f0f0f1;
-    --dim: #5a5d61;
-    --link: #8a6d3b;
+    --dim: #64686b;
+    --link: #5b7fa6;
     --rule: #e2e4e7;
-    --focus: #8a6d3b;
+    --focus: #5b7fa6;
     /* Syntax, the way dots spends colour. Counted in ui/style.css: ink 122
      * times, dim 119, and the accent 56 - but almost every one of those is a
      * TINT behind something (`color-mix(accent 16%, transparent)`), not a
-     * colour for text. So no gold in the code at all. A reserved word is ink
-     * carrying weight, a literal is the one muted blue dots keeps for place,
-     * a comment is the dim tone, and a retired word is the one red. Each
-     * clears 3:1 on the card; docs_check measures them. */
+     * colour for text. So the code is greyscale and the accent is spent on
+     * "this is active" alone: a reserved word is told apart by WEIGHT, a
+     * literal by a lighter ink, a comment by a lighter one still. The only
+     * hue left is the red on a word the language retired, which is a state
+     * and not a choice. Each clears 3:1; docs_check measures them. */
     --tok-k: #24292e;
     --tok-t: #24292e;
-    --tok-s: #5b7fa6;
-    --tok-n: #5b7fa6;
+    --tok-s: #44484d;
+    --tok-n: #44484d;
     --tok-f: #24292e;
     --tok-x: #a03027;
 }
@@ -62,14 +62,14 @@
         --bg: #1e1e1e;
         --fg: #dcddde;
         --code-bg: #161616;
-        --dim: #acadae;
-        --link: #c9a26d;
+        --dim: #a3a4a4;
+        --link: #8aa8cc;
         --rule: #2e3134;
-        --focus: #c9a26d;
+        --focus: #8aa8cc;
         --tok-k: #dcddde;
         --tok-t: #dcddde;
-        --tok-s: #8aa8cc;
-        --tok-n: #8aa8cc;
+        --tok-s: #c0c0c1;
+        --tok-n: #c0c0c1;
         --tok-f: #dcddde;
         --tok-x: #e88b7d;
     }
