@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>veil</title>
+<meta name="description" content="A UI framework where the program says what it means and veil decides what it looks like.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<a class="skip" href="#guide">Skip to the guide</a>
+
+<header>
+<h1>veil</h1>
+<p class="lede">A UI framework where the program says what it means and veil decides what it looks like.</p>
+<p class="lede"><a href="https://github.com/Lone-Lodge/veil">The repository</a>
+is where the gates live: <code>bash tools/gates.sh</code> runs all 247 of them,
+then builds the wasm gallery.</p>
+</header>
+
+<nav class="toc" aria-labelledby="toc-h">
+<h2 class="toc-h" id="toc-h">On this page</h2>
+<ol>
+<li><a href="#the-shape-of-it">The shape of it</a></li>
+<li><a href="#the-smallest-app">The smallest app</a></li>
+<li><a href="#a-theme">A theme</a></li>
+<li><a href="#what-a-node-is">What a node is</a></li>
+<li><a href="#a-list-of-twenty-four-thousand-things">A list of twenty-four thousand things</a></li>
+<li><a href="#something-hanging-in-the-world">Something hanging in the world</a></li>
+<li><a href="#answering-a-pointer">Answering a pointer</a></li>
+<li><a href="#zones-for-a-screen-with-panels-on-it">Zones, for a screen with panels on it</a></li>
+<li><a href="#reading-the-other-way">Reading the other way</a></li>
+<li><a href="#the-screen-said-out-loud">The screen, said out loud</a></li>
+<li><a href="#who-gets-the-input">Who gets the input</a></li>
+<li><a href="#what-it-costs">What it costs</a></li>
+<li><a href="#running-it">Running it</a></li>
+<li><a href="#what-is-not-done">What is not done</a></li>
+<li><a href="#license">License</a></li>
+</ol>
+</nav>
+
+<main id="guide">
+<p>A UI framework where the program says what it means and veil decides what it looks like. You build a document of named nodes; a theme says how a role is drawn; veil measures it, places it, and hands out a display list. Nothing in veil knows about a window, a GPU or a DOM.</p>
+<p>This page, on veil&#x27;s own paper and with the code coloured: <b><a href="https://lone-lodge.github.io/veil/">lone-lodge.github.io/veil</a></b>.</p>
+<p>The same document runs three ways today:</p>
+<table><thead><tr><th>target</th><th>painter</th><th>what it costs</th></tr></thead><tbody><tr><td>native</td><td>atlas / d3d12</td><td>a window</td></tr><tr><td>a tab</td><td>one WebGL draw call</td><td>244 kB of wasm, no server, no framework</td></tr><tr><td>anywhere</td><td>JSON over HTTP</td><td>a round trip a frame</td></tr></tbody></table>
+<h2 id="the-shape-of-it">1. The shape of it</h2>
+<pre><code>SemanticDocument   nodes, flat, each naming its children by index
+      +
+Theme              how a role is drawn, and in which state
+      |
+   measure         how big each node wants to be
+      |
+   place           where each one ended up          -&gt; [Measured]
+      |
+   paint           what to draw, in order           -&gt; DisplayList
+      |
+  a painter        the card, canvas, d3d12, JSON</code></pre>
+<p>A <b>Frame</b> carries all of it, so the next frame can be told from the last one instead of built from nothing.</p>
+<h2 id="the-smallest-app">2. The smallest app</h2>
+<pre><code data-code>use veil_document
+use veil_resolver
+use veil_theme
+use veil_page
+
+define screen() -&gt; SemanticDocument:
+    a = append([], n(&quot;text&quot;, [p(&quot;text&quot;, &quot;Hej&quot;)], []))
+    b = append(a, n(&quot;panel&quot;, [p(&quot;pad&quot;, &quot;16&quot;)], [top(a)]))
+    SemanticDocument{root: top(b), nodes: b}
+
+public define frame() -&gt; number:
+    room = Rect{x: 0.0, y: 0.0, wide: 800.0, high: 600.0}
+    here = first_frame(screen(), default_theme(), font_body(), room)
+    pack_page(here.list)</code></pre>
+<p><code>first_frame</code> builds one from nothing. <code>next_frame(before, ...)</code> builds one from the frame before and is six times cheaper, because it re-measures and re-places only the nodes that changed.</p>
+<p><code>pack_page</code> is the seam out: the whole frame as two blocks of numbers and one call. <code>display_list_json</code> is the same frame as JSON when the renderer is somewhere else.</p>
+<h2 id="a-theme">3. A theme</h2>
+<p><code>default_theme()</code> draws: six roles in light, <code>dark_theme()</code> the same six inverted. It is a floor, not a design system, so an app can put a document on the screen before it has decided what it looks like.</p>
+<pre><code data-code>styled(name, pad, gap, fg, bg, way, radius, size)   a rule
+dressed(...)                                       the same plus border and shadow</code></pre>
+<p>A rule named <code>button:lit</code> is the <code>button</code> rule while that node is in state <code>lit</code>. A theme only spells out the states it changes; the rest fall back. A role with no rule draws nothing at all, which is veil saying it does not know that word.</p>
+<h2 id="what-a-node-is">4. What a node is</h2>
+<pre><code data-code>n(role, props, children)     a node
+p(key, content)              one property
+top(nodes)                   the index of the one just appended</code></pre>
+<p>Everything is a property, and a property is text. <code>p(&quot;pad&quot;, &quot;16&quot;)</code>, <code>p(&quot;text&quot;, &quot;Hej&quot;)</code>, <code>p(&quot;do&quot;, &quot;save&quot;)</code>, <code>p(&quot;state&quot;, &quot;lit&quot;)</code>. The theme reads roles and states; the resolver reads layout properties. A property nobody reads costs nothing.</p>
+<p>Layout properties the resolver knows: <code>w</code>, <code>h</code>, <code>pad</code>, <code>gap</code>, <code>fill</code>, <code>grow</code>, <code>layout</code> (<code>flow</code>), <code>align</code>, <code>justify</code>, <code>wrap</code>, <code>radius</code>, <code>scroll_y</code>, <code>scrollbar</code>, <code>clip</code>. Painting: <code>text</code>, <code>icon</code>, <code>image</code>, <code>nine</code>, <code>slice</code>, <code>shape</code>, <code>state</code>. Interaction: <code>do</code> (what a press means), <code>caret</code>, <code>anchor</code>, <code>zone</code>. Text on its way in: <code>compose_from</code>, <code>compose_to</code>. A list that is mostly not there: <code>rows</code>, <code>row_h</code>, <code>from</code>. Something hanging in the world: <code>at_x</code>, <code>at_y</code>, <code>pin</code>, <code>world</code>, <code>order</code>.</p>
+<h2 id="a-list-of-twenty-four-thousand-things">5. A list of twenty-four thousand things</h2>
+<pre><code data-code>win = row_window(24000, 26, 150, at)
+n(&quot;well&quot;, [p(&quot;rows&quot;, &quot;24000&quot;), p(&quot;row_h&quot;, &quot;26&quot;), p(&quot;from&quot;, &quot;{win.first}&quot;),
+           p(&quot;h&quot;, &quot;150&quot;), p(&quot;clip&quot;, &quot;1&quot;), p(&quot;scrollbar&quot;, &quot;1&quot;),
+           p(&quot;scroll_y&quot;, &quot;{at}&quot;)], the_twelve)</code></pre>
+<p>The box says how many rows there <b>are</b>, how tall one is, and which one the first of the ones you handed over is. veil puts it where its index belongs and reports the whole list&#x27;s height, so the scroll and the scrollbar tell the truth about a list that is mostly not there. Twenty-four thousand rows cost <b>eight draw commands</b>.</p>
+<p>Say <code>row_h</code> and the arithmetic is exact. Leave it out - a chat log whose lines wrap to different heights cannot know it in advance - and the length of the list is the <b>average of the rows in hand</b>: a guess that gets better as you go and is exact once you have been everywhere. What drifts is the scrollbar thumb, by a little, in places you have not been yet.</p>
+<p>The same idea one dimension further is a bag: <code>layout: grid</code> with <code>cols</code>, and the items land in the cells their own indices name. Ten thousand slots four across, showing forty, is forty nodes and one number.</p>
+<pre><code data-code>n(&quot;bag&quot;, [p(&quot;layout&quot;, &quot;grid&quot;), p(&quot;cols&quot;, &quot;8&quot;), p(&quot;rows&quot;, &quot;10000&quot;),
+          p(&quot;row_h&quot;, &quot;48&quot;), p(&quot;from&quot;, &quot;{win.first * 8}&quot;), p(&quot;clip&quot;, &quot;1&quot;),
+          p(&quot;scrollbar&quot;, &quot;1&quot;), p(&quot;scroll_y&quot;, &quot;{at}&quot;)], the_forty)</code></pre>
+<p>A gradient is any number of stops in either direction - <code>grad:0a0a0a:2a2a2a</code> down the box, <code>grad:across:f00:0f0:00f</code> along it. It is baked onto the picture sheet as a strip and drawn as a picture, which is why the count of stops costs nothing.</p>
+<h2 id="something-hanging-in-the-world">6. Something hanging in the world</h2>
+<pre><code data-code>n(&quot;plate&quot;, [p(&quot;at_x&quot;, &quot;{sx}&quot;), p(&quot;at_y&quot;, &quot;{sy}&quot;), p(&quot;pin&quot;, &quot;above&quot;),
+            p(&quot;world&quot;, &quot;1&quot;), p(&quot;order&quot;, &quot;{far - dist}&quot;)], name_and_bar)</code></pre>
+<p>The game projects - veil is not a camera - and hands over a screen point. <code>pin</code> says how the box sits <b>on</b> the point rather than starting at it; <code>world: 1</code> says the point is real, so a plate whose owner walked behind you is gone rather than pinned to the edge; <code>order</code> is the depth. A thousand nameplates of which sixty are in front of you: 61 draw commands, and a told frame of 1 ms.</p>
+<h2 id="answering-a-pointer">7. Answering a pointer</h2>
+<pre><code data-code>pick_placed(doc, theme, placed, x, y)    what is under the pointer, by `do` name
+near_toward(doc, placed, from, dx, dy)   what is that way from here, for arrows
+reading_order(doc, placed)               tab order, out of the layout</code></pre>
+<p>Nobody keeps a list of what is beside what: a screen that grew a control yesterday is walked today.</p>
+<h2 id="zones-for-a-screen-with-panels-on-it">8. Zones, for a screen with panels on it</h2>
+<p>A game screen is eight panels, not one long ring. <code>p(&quot;zone&quot;, &quot;bags&quot;)</code> on a panel and everything in it is the bags. The ring <b>moving</b> is zone-bound - an arrow or a stick means &quot;the next thing over there&quot;, and there is nothing over there once the panel ends. Tab is not: it means &quot;the next thing on this screen&quot;, as it always has.</p>
+<pre><code data-code>zone_of(doc, name)                     which panel something stands in
+zone_names(doc, placed)                the panels, in reading order
+reading_order_in(doc, placed, zone)    the ring inside one panel
+scroller_of(doc, name)                 which scrolling box something is in
+scroll_to_show(doc, placed, name, m)   where that box has to be
+content_reach / content_seen           how long the list is, how much shows
+scroll_by_stick(now, push, reach, seen)   a stick that scrolls</code></pre>
+<p>A screen that names no zones has one called <code>&quot;&quot;</code>, and then none of this changes anything - which is why it is the default rather than a mode.</p>
+<h2 id="reading-the-other-way">9. Reading the other way</h2>
+<p>Arabic and Hebrew do not put a left-to-right screen in a mirror: the whole screen turns over. <code>p(&quot;dir&quot;, &quot;rtl&quot;)</code> on the <b>root</b> says so, and every box in the flow is mirrored inside its parent - so <code>align: start</code> means the right without knowing that it does, the scrollbar moves to the left, and a line of text narrower than its box sits against the side the reading ends at.</p>
+<p>What is not mirrored: anything placed at a point it named itself. <code>at_x</code> is a screen coordinate, and a nameplate over a head does not move because the menus turned around.</p>
+<p>What this is not is <b>bidi</b>. A screen has one direction here; an Arabic sentence with an English name in the middle of it needs the text engine to reorder the run, and that is a different piece of work - the same GSUB machinery Arabic shaping needs.</p>
+<p>What a program *says* is orion&#x27;s <code>words</code> orb, not veil&#x27;s business: the source says a key, a table says what it sounds like here, and a key nobody translated answers with itself so a missing saying is visible on the screen rather than being an empty button.</p>
+<h2 id="the-screen-said-out-loud">10. The screen, said out loud</h2>
+<p>A screen reader cannot look at pixels: it has to be told what is there. veil already knows every part of the answer - what a thing is, what it is called, what state it is in, and the order a person reads them - so this is that knowledge gathered rather than invented:</p>
+<pre><code data-code>spoken_screen(doc, placed)   -&gt; [Spoken{name, role_name, says, state}]</code></pre>
+<p>The page keeps the same screen a second time beside the canvas as plain elements, out of sight, with ARIA roles and <code>aria-activedescendant</code> on whatever has the ring. A reader reads those. The list and the ring walk the <b>same order</b>, because a reader and a keyboard are the same person navigating the same screen.</p>
+<p>It is rebuilt only when it changed, and at four times a second rather than sixty: a reader handed a new tree sixty times a second starts its sentence over sixty times a second, which is worse than saying nothing.</p>
+<p><code>says:</code> on a node is what it is called when it has nothing to read - an icon button shows a glyph and means &quot;close&quot;.</p>
+<h2 id="who-gets-the-input">11. Who gets the input</h2>
+<p>A game has to ask the UI before it acts, because the UI is on top:</p>
+<pre><code data-code>if not over_ui(doc, dress, placed, mx, my):
+    shoot()
+if not taking_keys(doc):
+    move(w, a, s, d)
+if not holding_pad(doc):
+    swing_camera(rx, ry)</code></pre>
+<p>All three are derived from the document already on screen, so none of them can drift out of step with what is drawn.</p>
+<p>The devices themselves are orion&#x27;s <code>input</code> orb, which answers the same eleven questions on both targets - the Windows runtime out of XInput and raw HID, the page out of the browser&#x27;s Gamepad API:</p>
+<pre><code data-code>pads_here()              how many controllers
+pad_sort(i)              &quot;xbox&quot; | &quot;dualsense&quot; | &quot;dualshock&quot; | &quot;switch&quot; | &quot;pad&quot;
+pad_axis(i, &quot;lx&quot;)        -1.0 to 1.0, dead zone already gone
+pad_down(i, &quot;south&quot;)     names, not letters: south is A and it is cross
+pad_pressed(i, &quot;south&quot;)  true on the frame it goes down
+pad_step_x(i)            one step, then a wait, then a repeat - like a held key
+touching()               was the last pointer a finger
+last_used()              &quot;mouse&quot; | &quot;keys&quot; | &quot;touch&quot; | &quot;pad&quot;
+composing()              text on its way in, from an IME</code></pre>
+<p>A pad is a <b>virtual</b> pad: south, east, west and north, never A/B/X/Y and never cross/circle/square/triangle. Adding a make is a table in the runtime, not a branch in your app.</p>
+<h2 id="what-it-costs">12. What it costs</h2>
+<p>Measured in a tab, 1422x1249, 147 draw commands, a page with one meter animating:</p>
+<pre><code>veil, a frame told from the last one   0.145 ms
+the seam packing it as numbers         0.065
+the page reading it into instances     0.080
+the draw call                          0.035
+                                       -------
+                                       0.33 ms</code></pre>
+<p>A still screen costs <b>nothing</b>: the page asks <code>restless()</code> first, and a screen where nothing is moving is not built at all. Of the 147 commands, 139 are handed over from the frame before rather than worked out again.</p>
+<p>Nothing outside the clip is drawn, and neither is anything inside it - so the cost of a screen is the cost of what you can see on it:</p>
+<pre><code>24 000 rows in a box showing 33          8 commands
+1 000 nameplates, 60 in front of you    61 commands, 1 ms told
+20 000 children under ONE node          13 ms to place, 4 ms told</code></pre>
+<h2 id="running-it">13. Running it</h2>
+<pre><code>bash tools/gates.sh</code></pre>
+<p>247 checks, then the wasm target: it builds the gallery, validates the module, and checks that every import it asks for is one the page supplies. The wasm half is in the gate because it once rotted through a whole compiler migration while nothing built it.</p>
+<p>The gallery itself:</p>
+<pre><code>bash examples/wasm_gallery/build.sh
+python -m http.server 7801 --directory examples/wasm_gallery</code></pre>
+<p>Seven pages: controls, layout, content, docking, a game HUD, a canvas, theming. <code>?gpu=0</code> swaps the card for the canvas2d reader, which is also what happens by itself on a machine without webgl2.</p>
+<h2 id="what-is-not-done">14. What is not done</h2>
+<ul><li><b>There is no blend mode.</b> A picture is drawn over what is under it and that is all. An additive glow belongs to a game&#x27;s renderer rather than to its UI, and adding a mode here would split the one draw call the whole screen is.</li><li><b>Text is placed letter by letter, no kerning.</b> That is deliberate: veil measures a line by adding advances, so it draws it the same way and the two can never disagree. <code>typeface</code> can read GPOS kerning, but the painters cannot - a browser canvas has its own advances - so kerning here would make the measurement and the drawing disagree, which is worse than a wide &quot;AV&quot;.</li><li><b>A native screen reader is not wired up.</b> The page speaks ARIA. A Windows host needs a UI Automation provider - six COM interfaces written out by hand in C, and a UIA client written to check them - and that is a project rather than an afternoon. The cheap trick was tried and is written down here so it is not tried twice: a child window per thing, with its name as the window text, which Windows makes accessible for free. It works right up until SetWindowTextW on thirty-four of them a second turns the app into a repaint storm at a hundred percent of a core. <code>spoken_screen</code> is the half of the real thing that would not have to be written twice.</li><li><b>No shaping.</b> Arabic needs contextual forms - a letter looks different at the start, the middle and the end of a word - and without them Arabic text is not ugly, it is unreadable. CJK needs no shaping but does need the glyphs, and the 19 kB Inter subset the gallery ships has neither. This is the same GSUB/GPOS machinery kerning would need, and it is the one piece of localization that is a project rather than a day.</li><li><b>Painting is not incremental.</b> Measuring and placing skip what did not change; painting and packing still walk the tree, though they now stop at anything outside the clip. Worth knowing and not worth fixing: a whole told frame is 0.4 ms in a hidden tab and 0.2 at best, and painting is a fraction of that.</li></ul>
+<h2 id="license">15. License</h2>
+<p>Apache 2.0. Copyright 2026 Lone Lodge. See <a href="LICENSE">LICENSE</a> and <a href="NOTICE">NOTICE</a>.</p></main>
+
+<footer>
+<p>veil is written in <a href="https://github.com/Lone-Lodge/orion">Orion</a>.
+Nothing in it knows about a window, a GPU or a DOM.</p>
+</footer>
+
+<script src="highlight.js"></script>
+
+</body>
+</html>

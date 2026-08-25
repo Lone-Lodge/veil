@@ -5,6 +5,9 @@ looks like. You build a document of named nodes; a theme says how a role is
 drawn; veil measures it, places it, and hands out a display list. Nothing in
 veil knows about a window, a GPU or a DOM.
 
+This page, on veil's own paper and with the code coloured:
+**[lone-lodge.github.io/veil](https://lone-lodge.github.io/veil/)**.
+
 The same document runs three ways today:
 
 | target | painter | what it costs |

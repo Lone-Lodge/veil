@@ -37,5 +37,9 @@ jobs:
       - name: bootstrap orion
         run: cd orion && bash tools/bootstrap.sh
 
+      # The page is generated from the README; a drifted page is a lie.
+      - name: guide matches the readme
+        run: cd veil && python tools/guide.py --check
+
       - name: gates
         run: cd veil && PATH="$PWD/../orion/dist:$PATH" bash tools/gates.sh

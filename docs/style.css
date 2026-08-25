@@ -1,0 +1,304 @@
+/* veil guide - one stylesheet, no build step, no dependencies.
+ *
+ * The palette is dots': near-white paper on a soft grey card, obsidian dark
+ * without the purple, and gold as the one accent. Same colours as the
+ * workshop, so a person moving between them is looking at one thing.
+ *
+ * Gold is where taste and legibility collide. dots' #8a6d3b is 4.6:1 on its
+ * own paper - fine for an app's chrome, nowhere near the 7:1 AAA wants for
+ * body-size text. So light mode takes the same hue down to a deep gold and
+ * dark mode keeps dots' own lighter one, which already clears it. dots'
+ * hairline rule and its dim grey get the same treatment: a document that is
+ * read is not an app's chrome.
+ *
+ * Nothing here is eyeballed. tools/guide.py checks this palette and
+ * recomputes every pair that carries meaning, so a colour that drifts below
+ * its threshold fails the build:
+ *
+ *   light   text #24292e on #fafafa   14.1:1
+ *           text #24292e on #f0f0f1   12.9:1   (code)
+ *           dim  #474c52 on #f0f0f1    7.6:1   (comments)
+ *           gold #5f4a1f on #fafafa    8.1:1   (links, keywords)
+ *           rule #80858b on #f0f0f1    3.3:1   (borders)
+ *   dark    text #dcddde on #1e1e1e   12.3:1
+ *           text #dcddde on #161616   13.3:1   (code)
+ *           dim  #a0a6ac on #161616    7.4:1   (comments)
+ *           gold #c9a26d on #1e1e1e    7.0:1
+ *           rule #6f7479 on #161616    3.8:1
+ *
+ * Code IS syntax-highlighted (highlight.js, the same token categories as the
+ * VS Code grammar), and it still clears AAA. Five hues that each clear 7:1
+ * stay distinguishable because they are real hues - gold, teal, olive, plum,
+ * brown - not five tints of one. docs_check measures every one.
+ */
+
+:root {
+    color-scheme: light dark;
+    --bg: #fafafa;
+    --fg: #24292e;
+    --code-bg: #f0f0f1;
+    --dim: #474c52;
+    --link: #5f4a1f;
+    --rule: #80858b;
+    --focus: #5f4a1f;
+    /* Syntax token colours. Distinct hues, each >=7:1 on --code-bg (AAA), so
+     * highlighting costs the guide nothing on contrast. docs_check verifies. */
+    --tok-k: #5f4a1f;
+    --tok-t: #0a5348;
+    --tok-s: #3f5412;
+    --tok-n: #7a356e;
+    --tok-f: #6a3f14;
+    --tok-x: #8a2014;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #1e1e1e;
+        --fg: #dcddde;
+        --code-bg: #161616;
+        --dim: #a0a6ac;
+        --link: #c9a26d;
+        --rule: #6f7479;
+        --focus: #c9a26d;
+        --tok-k: #c9a26d;
+        --tok-t: #6fd0c4;
+        --tok-s: #b6cf8e;
+        --tok-n: #daa6df;
+        --tok-f: #e0c58c;
+        --tok-x: #ffab98;
+    }
+}
+
+/* AAA 1.4.12: the reader may override spacing. Everything below is in
+ * relative units so nothing collapses when they do, or at 200% zoom. */
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    padding: 2rem 1.25rem 6rem;
+    background: var(--bg);
+    color: var(--fg);
+    font: 1.0625rem/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    /* AAA 1.4.8: no justified text, and no more than 80 characters a line. */
+    text-align: left;
+}
+
+/* One column, centred, capped at reading width. */
+main, header, footer { max-width: 42rem; margin-inline: auto; }
+
+/* AAA 2.4.1: a way past the header for keyboard and screen-reader users.
+ * Visible the moment it has focus rather than hidden outright. */
+.skip {
+    position: absolute;
+    left: -100vw;
+}
+.skip:focus {
+    position: static;
+    display: inline-block;
+    margin-bottom: 1rem;
+}
+
+/* AAA 2.4.7 / 2.4.11: focus is never removed and never obscured. */
+a:focus-visible,
+:focus-visible {
+    outline: 3px solid var(--focus);
+    outline-offset: 2px;
+    border-radius: 2px;
+}
+
+h1 {
+    font-size: 1.875rem;
+    line-height: 1.25;
+    margin: 0 0 0.25rem;
+}
+
+h2 {
+    font-size: 1.25rem;
+    line-height: 1.3;
+    margin: 2.75rem 0 0.75rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--rule);
+}
+
+.lede {
+    margin: 0 0 1.5rem;
+    color: var(--dim);
+}
+
+/* Jump list. Static, never sticky: a bar pinned to the top is the usual way
+ * a focused link ends up hidden behind something while tabbing, which is
+ * exactly what 2.4.11 and 2.4.12 are about. Ten links do not need to follow
+ * you down the page.
+ *
+ * A real <ol> because the sections are numbered and read in order; the
+ * numbers come from the list, so the link text alone still says where it
+ * goes (2.4.9). */
+.toc {
+    max-width: 42rem;
+    margin: 0 auto 2.5rem;
+    padding: 1rem 1.25rem 0.5rem;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+}
+.toc-h {
+    border-top: none;
+    padding-top: 0;
+    margin: 0 0 0.75rem;
+    font-size: 1rem;
+}
+.toc ol {
+    margin: 0;
+    padding-left: 1.5rem;
+    /* Two columns where there is room, one where there is not. No media
+     * query needed, and it reflows at 320px and at 200% zoom (1.4.10). */
+    columns: 2;
+    column-gap: 2rem;
+}
+.toc li { margin-bottom: 0.5rem; break-inside: avoid; }
+.toc .toc-last { margin-bottom: 0.75rem; }
+
+/* A heading that has just been jumped to should not sit flush against the
+ * viewport edge, and the anchor must clear any future sticky header. */
+h2[id] { scroll-margin-top: 1rem; }
+
+/* AAA 1.4.8: paragraph spacing at least 1.5x the line height. */
+p { margin: 0 0 1.25rem; }
+
+ul { margin: 0 0 1.25rem; padding-left: 1.5rem; }
+li { margin-bottom: 0.5rem; }
+
+/* Links carry an underline, so they are not distinguished by colour alone
+ * (1.4.1). Thick enough to survive a low-contrast display. */
+a {
+    color: var(--link);
+    text-decoration-line: underline;
+    text-decoration-thickness: 0.09em;
+    text-underline-offset: 0.16em;
+}
+
+/* Language switcher. aria-current marks the active one; the parenthesised
+ * label is there so it does not read as colour-only either. */
+.langs {
+    margin: 0 0 2rem;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    font-size: 0.9375rem;
+}
+.langs li { margin: 0; }
+.langs [aria-current="page"] {
+    color: var(--fg);
+    text-decoration: none;
+    font-weight: 600;
+}
+
+pre {
+    background: var(--code-bg);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 0.875rem 1rem;
+    /* Long lines scroll here rather than forcing the page sideways (1.4.10).
+     * Keyboard-reachable so it is not a scroll trap. */
+    overflow-x: auto;
+    margin: 0 0 1.25rem;
+}
+
+code, pre, kbd {
+    font-family: ui-monospace, SFMono-Regular, "Cascadia Mono", Consolas, monospace;
+    font-size: 0.9375rem;
+}
+
+pre code { background: none; padding: 0; }
+
+/* Inline code needs a hint of a box, not a colour change. */
+:not(pre) > code {
+    background: var(--code-bg);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 0.05em 0.3em;
+}
+
+/* Syntax highlighting (highlight.js), mirroring the VS Code grammar's token
+ * categories. `.c` is the legacy comment class kept for any static markup.
+ * Each hue clears 7:1 on the code background in both themes, chosen so five
+ * DISTINCT hues stay distinguishable at AAA where five tints would not. */
+.c,
+.hl-c { color: var(--dim); }
+.hl-k { color: var(--tok-k); }
+.hl-t { color: var(--tok-t); }
+.hl-s { color: var(--tok-s); }
+.hl-n { color: var(--tok-n); }
+.hl-f { color: var(--tok-f); }
+.hl-x { color: var(--tok-x); text-decoration: line-through; }
+
+/* Library reference (reference.html): each orb's exported functions, one per
+ * row, signature then a one-line description. The blurb and the description
+ * are dim like a comment. No new colours, so the palette check still covers
+ * every pair; --dim sits on --bg here, lighter than --code-bg, so it clears
+ * the 7:1 the comment check already proves on the darker code background. */
+.orb-blurb {
+    color: var(--dim);
+    margin: -0.25rem 0 1.25rem;
+}
+.sub {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--dim);
+    margin: 1.25rem 0 0.6rem;
+}
+.fn { margin: 0 0 1rem; }
+.fn .sig {
+    display: inline-block;
+    padding: 0.15em 0.45em;
+}
+.fn p {
+    margin: 0.35rem 0 0;
+    color: var(--dim);
+}
+
+/* Copy button, added by a small script to every code block. Subtle by default
+ * so it never competes with the code, terracotta on hover/focus. Kept visible
+ * (not hover-only) so it works on touch and for keyboard users. */
+.code-wrap { position: relative; }
+.copy-btn {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    font: inherit;
+    font-size: 0.8125rem;
+    line-height: 1;
+    padding: 0.25em 0.6em;
+    color: var(--dim);
+    background: var(--bg);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    cursor: pointer;
+    opacity: 0.55;
+    transition: opacity 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.code-wrap:hover .copy-btn,
+.copy-btn:focus { opacity: 1; }
+.copy-btn:hover,
+.copy-btn.copied { color: var(--link); border-color: var(--link); }
+
+footer {
+    margin-top: 3.5rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--rule);
+    color: var(--dim);
+    font-size: 0.9375rem;
+}
+
+/* Nothing here animates, but say so explicitly for anything added later. */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+/* proven usage under a reference entry: the example lines the build runs */
+.fn pre.ex { margin: 0.35rem 0 0.2rem; padding: 0.4rem 0.6rem; font-size: 0.85em; opacity: 0.85; overflow-x: auto; }
