@@ -186,13 +186,20 @@ p { margin: 0 0 1.25rem; }
 ul { margin: 0 0 1.25rem; padding-left: 1.5rem; }
 li { margin-bottom: 0.5rem; }
 
-/* Links carry an underline, so they are not distinguished by colour alone
- * (1.4.1). Thick enough to survive a low-contrast display. */
+/* A link is ink with a line under it, not a colour. In dots the gold means
+ * CONNECTION and it is spent sparingly; a page where every link is gold
+ * spends it on nothing. So the line is what marks a link (1.4.1 wants more
+ * than colour anyway), and the gold arrives when the pointer does. */
 a {
-    color: var(--link);
+    color: inherit;
     text-decoration-line: underline;
+    text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
     text-decoration-thickness: 0.09em;
     text-underline-offset: 0.16em;
+}
+a:hover {
+    color: var(--link);
+    text-decoration-color: var(--link);
 }
 
 /* Language switcher. aria-current marks the active one; the parenthesised
