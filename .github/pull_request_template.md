@@ -1,4 +1,4 @@
-<!-- Keep this short. A sentence of what is now true beats a paragraph of what
+<!-- Target `dev`, not `main`. Keep this short. A sentence of what is now true beats a paragraph of what
      you did. The subject line of the merge commit will be that sentence. -->
 
 ## What is now true

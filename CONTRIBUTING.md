@@ -28,9 +28,15 @@ every time.
 
 ## Sending a change
 
-You cannot push here, and that is the point: fork the repository, branch, and
-open a pull request. CI runs the gates on every one, on Linux and Windows, so
-a change is proven before anyone reads it.
+Two branches, and that is all: **`dev`** is where work lands, **`main`** is what
+has been released. Open your pull request against `dev` - it is the default
+branch, so a fork targets it without you having to think about it.
+
+You cannot push here, and that is the point: fork, branch off `dev`, and open a
+pull request. CI runs the gates on every one, on Linux and Windows, and `dev`
+will not take a merge until they are green. Nothing lands unread and unproven.
+
+`main` only moves for a release, and only by the maintainer.
 
 What gets merged: one thing at a time, small enough to read in a sitting, with
 the gate that proves it. What does not: a rewrite nobody asked for, a change
