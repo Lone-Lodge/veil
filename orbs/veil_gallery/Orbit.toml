@@ -1,0 +1,8 @@
+name = "veil_gallery"
+version = "0.1.0"
+description = "One screen that uses everything a UI framework has to have"
+
+[orbs]
+veil_edit = "path:../veil_edit"
+text = "*"
+input = "*"

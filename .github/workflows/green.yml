@@ -62,5 +62,12 @@ jobs:
       - name: guide matches the readme
         run: cd veil && python tools/guide.py --check
 
+      # The toolchain builds dist/orbit.exe on every platform, and gates.sh
+      # calls it `orbit`. Git Bash on Windows finds the .exe by itself; a
+      # Linux shell does not, and the gate died on "command not found".
+      - name: orbit under the name the scripts use
+        if: runner.os != 'Windows'
+        run: ln -sf orbit.exe orion/dist/orbit
+
       - name: gates
         run: cd veil && PATH="$PWD/../orion/dist:$PATH" bash tools/gates.sh

@@ -20,7 +20,9 @@ echo "== usable from the outside =="
 
 echo
 echo "== wasm =="
-bash examples/wasm_gallery/build.sh >/dev/null
+# Not silenced. It was, and a Windows runner died here with no message at all
+# while 247 checks above it had just said ok.
+bash examples/wasm_gallery/build.sh
 node -e '
 const fs = require("fs");
 const wasm = "examples/wasm_gallery/gallery.wasm";

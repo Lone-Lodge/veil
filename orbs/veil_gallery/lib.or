@@ -1,0 +1,2094 @@
+# veil_gallery - four screens that use everything a UI framework has to have.
+#
+# It exists to be demanding. Every section is something a real app or game
+# needs and something that breaks loudly when the layer under it is
+# missing: a list longer than its box needs clipping and scrolling, a
+# paragraph needs wrapping, a dialog needs to paint above its siblings, a
+# carousel needs a clip that scrolls sideways, Tab needs an order to walk.
+# Build it, look at it, and what is wrong is obvious.
+#
+#     doc = gallery_doc(state)
+#     list = resolve_in(doc, gallery_theme(), font, box)
+#     who = pick_spoken(doc, gallery_theme(), font, box, mx, my)
+#
+# The four pages are tabs, so the gallery can keep growing without turning
+# into a wall - and the tab bar is itself one of the things being shown.
+
+use input
+use veil_role
+use veil_document
+use veil_theme
+use veil_measure
+use veil_resolver
+use ori_geometry
+use ori_display
+use veil_edit
+use text
+
+public type Gallery:
+    # The window, in pixels. Named apart from Rect's `wide`/`high`
+    # because those are numbers and these are whole - and a field name
+    # means one shape across the whole program on the wasm backend.
+    win_w: int
+    win_h: int
+    seconds: number
+    # What the pointer is over and what has keyboard focus, as `do:` names.
+    hover: text
+    focus: text
+    # Whether the focus ring should be SEEN. A mouse moves focus without
+    # anybody needing to be told where it went - the hand is already
+    # there. A key or a pad moves it somewhere you are not looking, so it
+    # has to say where. A finger has no focus at all.
+    show_focus: truth
+    # Which page is showing.
+    tab: text
+    # The scrollable list's offset, and which row is chosen.
+    scroll: int
+    chosen: int
+    # The composer's contents, split by veil_edit into what is left of the
+    # selection, the selection itself, and what is right of it. The caret
+    # rides between the first two.
+    before: text
+    picked: text
+    after: text
+    typing: truth
+    # The multi-line note: its whole text, and where the caret and the
+    # other end of the selection are in it. The framework draws both,
+    # because only it knows where the lines break.
+    note: text
+    note_at: int
+    note_to: int
+    noting: truth
+    # The dialog, which has to paint above everything under it.
+    dialog: truth
+    # An open menu: "" none, else the name of the control it hangs from.
+    # A right-click menu remembers where it was opened.
+    menu: text
+    menu_x: int
+    menu_y: int
+    picked_item: text
+    # The switch, so a state has somewhere to live.
+    lit: truth
+    # Three things that hold a number you can drag: a plain slider and the
+    # two mixers every game has.
+    slider: int
+    volume: int
+    sfx: int
+    # Tickboxes, a radio group, a stepper.
+    vsync: truth
+    subs: truth
+    quality: text
+    steps: int
+    # The chosen screen size, from the dropdown.
+    screen: text
+    # Which card the carousel is showing, and which bag slot is held.
+    card: int
+    slot: int
+    # Key bindings: which row is waiting for a key, and what the two rows
+    # are bound to.
+    bind: text
+    key_fwd: text
+    key_jump: text
+    # Which tree branches and which folding sections are open: their names
+    # with a bar between them. ONE text rather than a list, because a text
+    # is what an app can hold across frames without ceremony - and neither
+    # the tree nor the accordion has to know how many of them there are.
+    open: text
+    # The drawer that slides in from the side.
+    drawer: truth
+    # Notices that come and go, newest last, as one text with bars between.
+    notes: text
+    # Whether the layout is being looked at rather than used.
+    boxes: truth
+    # What the pointer has rested on long enough to explain itself.
+    tip: text
+    # Whether the loud palette is on.
+    contrast: truth
+    bright: truth
+    # How large the whole interface is drawn, as a percentage. The screen
+    # sets it at startup and the reader can move it from here.
+    zoom: int
+    # Docking: how wide the left dock is, how tall the lower one, which
+    # panel each group is showing, and which panel is being carried.
+    dock_w: int
+    dock_h: int
+    dock_plan: text
+    dock_pick: text
+    dock_ws: text
+    carrying: text
+    # Where the carried thing is, and what is under it. A drag nobody can
+    # see is a drag nobody trusts: you should be looking at the whole
+    # thing you are moving and at the place it will land, not at a tab
+    # that went slightly grey.
+    carry_x: int
+    carry_y: int
+    over: text
+    # What the pointer has hold of. A grip MOVES while you drag it, so the
+    # pointer leads it and the hover flickers on and off every frame - and
+    # with colours that travel, a flicker becomes a strobe. What you are
+    # holding stays held whether or not the pointer is still on it.
+    grabbed: text
+    # Rows moved out of where the tree says they live, as "name>branch"
+    # pairs. A tree you can rearrange has to remember the rearranging
+    # somewhere, and a text is what an app can hold without ceremony.
+    moved: text
+    # Which column the table is sorted by, which way, and how far it has
+    # been scrolled.
+    sort_by: text
+    sort_up: truth
+    table_at: int
+    # How far down the page itself has been scrolled. A screen larger than
+    # its window is the normal case once the reader turns the size up, and
+    # squeezing everything until it fits is not an answer.
+    page: int
+
+# --- palette ---------------------------------------------------------------
+
+# Two palettes behind one set of names. High contrast is not a second
+# theme to keep in step - it is the same roles with the greys pushed
+# apart, so nothing that reads well in one can go missing in the other.
+# The tokens. Every colour in the whole theme is one of these names, and
+# each name says what it is FOR rather than what it looks like - which is
+# the only reason a light mode can exist at all: the roles never change,
+# only the four values behind each name.
+#
+#   dark            the ordinary night screen
+#   dark, hard      the same, greys pushed apart for contrast
+#   light           the ordinary day screen
+#   light, hard     the same, pushed apart
+public define set_contrast(on: truth) -> int:
+    slot_set("veil:contrast", if on then 1 else 0)
+
+public define set_bright(on: truth) -> int:
+    slot_set("veil:bright", if on then 1 else 0)
+
+define hard() -> truth:
+    slot_get_number("veil:contrast") is 1
+
+public define bright() -> truth:
+    slot_get_number("veil:bright") is 1
+
+define tone(dim: text, dim_loud: text, lit: text, lit_loud: text) -> text:
+    if bright() then (if hard() then lit_loud else lit) else (if hard() then dim_loud else dim)
+
+# Ink
+define ink() -> text = tone("#f2f2f2ff", "#ffffffff", "#1a1a1aff", "#000000ff")
+define ink_dim() -> text = tone("#9a9a9aff", "#e2e2e2ff", "#5e5e5eff", "#1f1f1fff")
+define ink_ghost() -> text = tone("#5a5a5aff", "#b4b4b4ff", "#a2a2a2ff", "#4a4a4aff")
+# The ink that reads on a BOLD ground - the accent, a warning, a strong
+# hue. Those colours are dark in both modes, so this one does not flip;
+# text on a grey step uses ink() and follows the mode like everything else.
+define ink_on_bold() -> text = "#ffffffff"
+
+# Ground: the page, a panel on it, and a well cut into the panel.
+define bg() -> text = tone("#141414ff", "#000000ff", "#f2f2f2ff", "#ffffffff")
+define card_bg() -> text = tone("#1c1c1cff", "#0a0a0aff", "#ffffffff", "#ffffffff")
+define sunk() -> text = tone("#101010ff", "#000000ff", "#e9e9e9ff", "#dcdcdcff")
+
+# A control, told by what is happening to it. Six steps is what a UI can
+# actually use: below rest, rest, under the pointer, held, and lifted.
+define deep() -> text = tone("#1a1a1aff", "#000000ff", "#edededff", "#e0e0e0ff")
+define rest() -> text = tone("#232323ff", "#141414ff", "#e8e8e8ff", "#dadadaff")
+define over() -> text = tone("#2a2a2aff", "#3c3c3cff", "#dededeff", "#ccccccff")
+define down() -> text = tone("#2e2e2eff", "#4a4a4aff", "#d4d4d4ff", "#bfbfbfff")
+define high() -> text = tone("#343434ff", "#585858ff", "#c9c9c9ff", "#b0b0b0ff")
+
+# What is picked out: a wash of the accent under ordinary ink, rather
+# than a plate that has to carry white text. A selection you can read is
+# worth more than one that shouts.
+define sel() -> text = tone("#2b3a55ff", "#39507aff", "#dbe6fbff", "#b9d0f7ff")
+define sel_deep() -> text = tone("#25324aff", "#324a6eff", "#cfe0fbff", "#a8c8f5ff")
+define line() -> text = tone("#2a2a2aff", "#8a8a8aff", "#dcdcdcff", "#707070ff")
+define accent() -> text = tone("#4f8cf7ff", "#7fb2ffff", "#2563ebff", "#0b3fbfff")
+define good() -> text = tone("#3ec98aff", "#5fe0a6ff", "#12885bff", "#065f39ff")
+define warn() -> text = tone("#e8a33cff", "#ffc266ff", "#a86a12ff", "#7a4a00ff")
+define bad() -> text = tone("#e2584dff", "#ff8a80ff", "#c2362bff", "#8e1f16ff")
+define veil_black() -> text = tone("#000000aa", "#000000cc", "#20202066", "#00000088")
+
+# What the tokens are called, for a screen that shows them.
+public define token_names() -> [text] = ["ink", "ink_dim", "ink_ghost", "bg", "card_bg", "sunk", "deep", "rest", "over", "down", "high", "line", "sel", "accent", "good", "warn", "bad"]
+
+public define token_value(name: text) -> text:
+    if name is "ink" then ink() else if name is "ink_dim" then ink_dim() else if name is "ink_ghost" then ink_ghost() else if name is "bg" then bg() else if name is "card_bg" then card_bg() else if name is "sunk" then sunk() else if name is "deep" then deep() else if name is "rest" then rest() else if name is "over" then over() else if name is "down" then down() else if name is "high" then high() else if name is "line" then line() else if name is "sel" then sel() else if name is "accent" then accent() else if name is "good" then good() else if name is "warn" then warn() else bad()
+
+define plain(name: text, pad: int, gap: int, fg: text, box: text, dir: text) -> StyleRule:
+    full(name, pad, gap, fg, box, dir, 0, 0, 0, "", 0, "")
+
+define rule(name: text, pad: int, gap: int, fg: text, box: text, dir: text, rad: int, size: int) -> StyleRule:
+    full(name, pad, gap, fg, box, dir, rad, size, 0, "", 0, "")
+
+define full(name: text, pad: int, gap: int, fg: text, box: text, dir: text, rad: int, size: int, bw: int, edge: text, blur: int, shade: text) -> StyleRule:
+    StyleRule{role_name: name, padding: pad, gap: gap, fg_colour: fg, bg_colour: box, direction: dir, radius: rad, size: size, border: bw, border_colour: edge, shadow: blur, shadow_colour: shade}
+
+# The theme is written in three groups only because one list literal of
+# sixty rules is not something anyone wants to read. The grouping means
+# nothing to the resolver - it sees one flat list.
+public define gallery_theme() -> Theme:
+    Theme{rules: cat_rules(cat_rules(frame_rules(), control_rules()), surface_rules())}
+
+define cat_rules(a: [StyleRule], b: [StyleRule]) -> [StyleRule]:
+    edit out = a
+    loop r in b:
+        out = append(out, r)
+    out
+
+# Scaffolding and text: the roles that carry no colour of their own, and
+# the sizes everything is written in.
+define frame_rules() -> [StyleRule]:
+    page = plain("page", 0, 0, "", bg(), "column")
+    strip = plain("strip", 0, 0, "", "", "row")
+    col = plain("col", 0, 0, "", "", "column")
+    # Empty space, and the thing that carries a mark. An icon takes its
+    # node's ink and a spacer had none, so every chevron, every twig and
+    # both ends of a stepper came out with no colour at all - which the
+    # painter is right to draw as nothing. A spacer that holds a mark has
+    # to say what colour the mark is.
+    air = plain("air", 0, 0, ink(), "", "column")
+
+    title = rule("title", 0, 0, ink(), "", "column", 0, 22)
+    head = rule("head", 0, 0, ink_dim(), "", "column", 0, 11)
+    body = rule("body", 0, 0, ink_dim(), "", "column", 0, 13)
+    lead = rule("lead", 0, 0, ink(), "", "column", 0, 14)
+    huge = rule("huge", 0, 0, ink(), "", "column", 0, 34)
+    tiny = rule("tiny", 0, 0, ink_ghost(), "", "column", 0, 10)
+
+    panel = full("panel", 16, 12, "", card_bg(), "column", 10, 0, 1, line(), 0, "")
+    sheet = full("sheet", 20, 14, "", card_bg(), "column", 12, 0, 1, line(), 24, "#00000077")
+    well = full("well", 8, 0, "", sunk(), "column", 8, 0, 1, line(), 0, "")
+    hair = plain("hair", 0, 0, "", line(), "row")
+
+    scrim = plain("scrim", 0, 0, "", veil_black(), "column")
+    menu = full("menu", 6, 2, "", rest(), "column", 8, 0, 1, high(), 18, "#00000088")
+    item = rule("item", 0, 8, ink_dim(), "", "row", 5, 13)
+    item_lit = rule("item:lit", 0, 8, ink(), high(), "row", 5, 13)
+    ghost_scrim = plain("air_scrim", 0, 0, "", "", "column")
+
+    [page, strip, col, air, title, head, body, lead, huge, tiny, panel, sheet, well, hair, scrim, menu, item, item_lit, ghost_scrim]
+
+# Everything you can press, tick, drag or type into. This is the shape of
+# the whole theme model: one role, several states, and no document
+# anywhere naming a colour.
+define control_rules() -> [StyleRule]:
+    btn = full("btn", 0, 8, ink(), over(), "row", 7, 13, 0, "", 0, "")
+    btn_lit = full("btn:lit", 0, 8, ink(), high(), "row", 7, 13, 0, "", 0, "")
+    btn_on = full("btn:on", 0, 8, ink_on_bold(), accent(), "row", 7, 13, 0, "", 0, "")
+    btn_focus = full("btn:focus", 0, 8, ink(), high(), "row", 7, 13, 2, accent(), 0, "")
+
+    tab = full("tab", 0, 8, ink_dim(), "", "row", 7, 13, 0, "", 0, "")
+    tab_lit = full("tab:lit", 0, 8, ink(), rest(), "row", 7, 13, 0, "", 0, "")
+    tab_on = full("tab:on", 0, 8, ink(), over(), "row", 7, 13, 0, "", 0, "")
+
+    row = rule("row", 0, 10, ink_dim(), "", "row", 6, 13)
+    row_lit = rule("row:lit", 0, 10, ink(), rest(), "row", 6, 13)
+    row_on = rule("row:on", 0, 10, ink(), sel(), "row", 6, 13)
+    # Anything you can click can hold the keyboard, so anything you can
+    # click needs a look for it. Without one the theme falls back to the
+    # resting rule and the focus ring simply vanishes.
+    row_focus = full("row:focus", 0, 10, ink(), rest(), "row", 6, 13, 1, accent(), 0, "")
+    tab_focus = full("tab:focus", 0, 8, ink(), rest(), "row", 7, 13, 2, accent(), 0, "")
+    track_focus = full("track:focus", 2, 0, "", over(), "row", 9, 0, 2, accent(), 0, "")
+    key_focus = full("key:focus", 0, 0, ink(), rest(), "row", 5, 12, 2, accent(), 0, "")
+    item_focus = full("item:focus", 0, 8, ink(), high(), "row", 5, 13, 0, "", 0, "")
+
+    field = full("field", 0, 6, ink(), sunk(), "row", 8, 13, 1, line(), 0, "")
+    field_focus = full("field:focus", 0, 6, ink(), sunk(), "row", 8, 13, 1, accent(), 0, "")
+    picked = full("picked", 0, 0, ink_on_bold(), "#2f5aa8ff", "column", 2, 14, 0, "", 0, "")
+    ghost = rule("ghost", 0, 0, ink_ghost(), "", "column", 0, 13)
+    caret = plain("caret", 0, 0, "", ink(), "column")
+
+    pip = rule("pip", 0, 0, "", ink_ghost(), "column", 4, 0)
+    pip_on = rule("pip:on", 0, 0, "", good(), "column", 4, 0)
+    track = rule("track", 2, 0, "", over(), "row", 9, 0)
+    track_on = rule("track:on", 2, 0, "", good(), "row", 9, 0)
+    knob = rule("knob", 0, 0, "", ink(), "column", 7, 0)
+    bar = rule("bar", 0, 0, "", over(), "row", 3, 0)
+    fill_bar = rule("fill", 0, 0, "", warn(), "row", 3, 0)
+
+    # A tickbox and a radio are the same control with a different corner.
+    chk = full("chk", 0, 0, "", over(), "column", 4, 0, 1, high(), 0, "")
+    # The mark inside a ticked box needs an ink of its own: an icon takes
+    # the node's, and a box that never holds words had none, so the mark
+    # came out in whatever the painter guessed.
+    chk_on = full("chk:on", 0, 0, ink_on_bold(), accent(), "column", 4, 0, 1, accent(), 0, "")
+    rad = full("rad", 0, 0, "", over(), "column", 9, 0, 1, high(), 0, "")
+    rad_on = full("rad:on", 0, 0, "", over(), "column", 9, 0, 1, accent(), 0, "")
+    dot = rule("dot", 0, 0, "", accent(), "column", 5, 0)
+
+    # The chip a key binding shows, and the state it takes while it waits
+    # for you to press something.
+    key = full("key", 0, 0, ink(), rest(), "row", 5, 12, 1, high(), 0, "")
+    key_on = full("key:on", 0, 0, ink_on_bold(), "#3a2a12ff", "row", 5, 12, 1, warn(), 0, "")
+
+    [btn, btn_lit, btn_on, btn_focus, tab, tab_lit, tab_on, tab_focus, row, row_lit, row_on, row_focus, track_focus, key_focus, item_focus, field, field_focus, ghost, picked, caret, pip, pip_on, track, track_on, knob, bar, fill_bar, chk, chk_on, rad, rad_on, dot, key, key_on]
+
+# Colour, depth, and the gradient fills - the closest thing the display
+# seam has to a shader, and enough for the surfaces a game menu wants.
+define surface_rules() -> [StyleRule]:
+    hp = rule("hp", 0, 0, "", bad(), "row", 3, 0)
+    mana = rule("mana", 0, 0, "", accent(), "row", 3, 0)
+    xp = rule("xp", 0, 0, "", good(), "row", 3, 0)
+
+    cell = full("cell", 0, 0, "", deep(), "column", 8, 0, 1, down(), 0, "")
+    cell_lit = full("cell:lit", 0, 0, "", rest(), "column", 8, 0, 1, high(), 0, "")
+    cell_on = full("cell:on", 0, 0, "", sel_deep(), "column", 8, 0, 2, accent(), 0, "")
+
+    deck = full("deck", 14, 6, "", deep(), "column", 10, 0, 1, down(), 12, "#00000066")
+
+    # `grad:TOP:BOTTOM`, six hex digits each. The renderer lerps per row,
+    # so these are smooth rather than banded - a real fill, not a stack of
+    # rectangles pretending to be one.
+    sky = rule("sky", 0, 0, "", "grad:2b5ea8:0d1626", "column", 10, 0)
+    fire = rule("fire", 0, 0, "", "grad:e8a33c:8a1d2e", "column", 10, 0)
+    deep_grad = rule("deep", 0, 0, "", "grad:3ec98a:0d2b1e", "column", 10, 0)
+    dusk = rule("dusk", 0, 0, "", "grad:7d4fc8:1a1030", "column", 10, 0)
+
+    # The tree, the folding sections and the drawer.
+    # A mark per kind of thing. Colour is what makes a file tree readable
+    # at a glance - you find the .or file by its blue, not by reading four
+    # names on the way down.
+    mark_dir = rule("mark:dir", 0, 0, "#e0b04aff", "", "column", 0, 0)
+    mark_code = rule("mark:code", 0, 0, "#6aa9f4ff", "", "column", 0, 0)
+    mark_run = rule("mark:run", 0, 0, "#5fc98aff", "", "column", 0, 0)
+    mark_doc = rule("mark:doc", 0, 0, ink_dim(), "", "column", 0, 0)
+    twig = rule("twig", 0, 8, ink_dim(), "", "row", 5, 13)
+    twig_lit = rule("twig:lit", 0, 8, ink(), rest(), "row", 5, 13)
+    twig_on = rule("twig:on", 0, 8, ink(), sel(), "row", 5, 13)
+    fold = full("fold", 0, 8, ink(), rest(), "row", 7, 13, 0, "", 0, "")
+    fold_lit = full("fold:lit", 0, 8, ink(), over(), "row", 7, 13, 0, "", 0, "")
+    drawer = full("drawer", 14, 10, "", rest(), "column", 10, 0, 1, high(), 20, "#00000088")
+    seg = rule("seg", 0, 0, "", over(), "row", 2, 0)
+    # A radial meter: the box colour is the whole circle, the ink is the
+    # share of it that is filled.
+    dial = rule("dial", 0, 0, accent(), over(), "column", 0, 13)
+    dial_warm = rule("warm", 0, 0, warn(), over(), "column", 0, 13)
+    dial_good = rule("cool", 0, 0, good(), over(), "column", 0, 11)
+    # A hotbar key, with the cooldown swept over it.
+    slot_key = full("hot", 0, 0, ink_dim(), deep(), "column", 8, 12, 1, down(), 0, "")
+    sweep = rule("sweep", 0, 0, "#00000099", "", "column", 0, 0)
+    # A dock: a group of panels behind tabs, and the line between two
+    # groups that you drag to give one of them more room.
+    dock = full("dock", 0, 0, "", deep(), "column", 8, 0, 1, over(), 0, "")
+    # A grip you can SEE. It was the same grey as everything around it,
+    # which is the same as not being there.
+    grip = rule("grip", 0, 0, "", high(), "row", 3, 0)
+    grip_lit = rule("grip:lit", 0, 0, "", accent(), "row", 3, 0)
+    grip_on = rule("grip:on", 0, 0, "", accent(), "row", 3, 0)
+    dtab = rule("dtab", 0, 0, ink_dim(), deep(), "row", 0, 12)
+    dtab_lit = rule("dtab:lit", 0, 0, ink(), over(), "row", 0, 12)
+    dtab_on = full("dtab:on", 0, 0, ink(), down(), "row", 0, 12, 0, "", 0, "")
+    # Where something will land: a wash, not a colour. A drop mark shouts
+    # in every program that gets it wrong - it has to say "here" while you
+    # can still see what is underneath, because what is underneath is the
+    # thing you are deciding about.
+    dropping = full("dropping", 0, 0, "", "#8a8a8a26", "column", 8, 0, 1, "#9a9a9a66", 0, "")
+    # The thing under your hand, drawn whole and lifted off the page.
+    # The thing in your hand: lifted off the page by its shadow rather
+    # than by being a different colour from everything it passes over.
+    carried = full("carried", 0, 0, ink(), "#2e2e2eee", "row", 6, 12, 1, "#6a6a6aaa", 18, "#000000aa")
+    # And the gap it will drop into.
+    seam = rule("seam", 0, 0, "", "#c8c8c8bb", "column", 1, 0)
+    area = rule("area", 0, 0, "#4f8cf766", "", "column", 0, 0)
+    area2 = rule("area2", 0, 0, "#3ec98a66", "", "column", 0, 0)
+    needle = rule("needle", 0, 0, warn(), "", "column", 0, 0)
+    # Where the carried thing WAS: a hole, not a second bright copy of it.
+    # Two lit blue tabs at once is the drag looking like it went wrong.
+    ghosted = full("ghosted", 0, 0, "#6a6a6a80", deep(), "row", 0, 12, 1, down(), 0, "")
+    # And the region it will land in, laid OVER the panel rather than
+    # repainting it: the shape of the place, translucent, the way every
+    # docking program shows it.
+    landing = full("landing", 0, 0, "", "#8a8a8a22", "column", 8, 0, 1, "#a6a6a666", 0, "")
+    # Every place a carried panel can land, shown at once and faintly, with
+    # the one under your hand brought forward. Seeing all of them is what
+    # tells you a new group is even possible.
+    # A small coloured shape that carries its own colour in the document:
+    # a swatch, an avatar, a badge. One role, three uses, because the only
+    # thing they have in common is being small and round and coloured.
+    chip = rule("chip", 0, 0, ink_on_bold(), "", "column", 4, 13)
+    chip_bad = rule("chipbad", 0, 0, ink_on_bold(), bad(), "column", 4, 11)
+    chip_good = rule("chipgood", 0, 0, bg(), good(), "column", 4, 11)
+    sunk_card = rule("sunk_card", 0, 0, ink(), sunk(), "column", 8, 13)
+    ghost_label = rule("ink_ghost_label", 0, 0, ink_ghost(), "", "column", 0, 13)
+    zone = full("zone", 0, 0, "", "#8a8a8a0a", "column", 6, 0, 1, "#8a8a8a1e", 0, "")
+    zone_on = full("zone:on", 0, 0, "", "#9a9a9a1c", "column", 6, 0, 1, "#b4b4b45a", 0, "")
+    # A tooltip, and the one place a radius per corner is the point: a tab
+    # is round on top and square where it meets its page.
+    tip = full("tip", 8, 0, ink(), down(), "row", 6, 12, 1, high(), 14, "#00000099")
+    toast = full("toast", 12, 8, ink(), rest(), "row", 8, 13, 1, accent(), 18, "#00000099")
+    carved = plain("carved", 0, 0, "#f4e3c8ff", "", "column")
+    ontop = full("ontop", 0, 8, ink(), over(), "row", 0, 13, 0, "", 0, "")
+    seg_on = rule("seg:on", 0, 0, "", accent(), "row", 2, 0)
+
+    blk = rule("blk", 0, 0, ink_on_bold(), "#39507aff", "column", 6, 12)
+    blk2 = rule("blk2", 0, 0, ink_on_bold(), "#3a6b52ff", "column", 6, 12)
+    blk3 = rule("blk3", 0, 0, ink_on_bold(), "#7a5039ff", "column", 6, 12)
+
+    soft = full("soft", 0, 0, "", rest(), "column", 4, 0, 0, "", 0, "")
+    round = full("round", 0, 0, "", rest(), "column", 14, 0, 0, "", 0, "")
+    edged = full("edged", 0, 0, "", deep(), "column", 8, 0, 2, accent(), 0, "")
+    raised = full("raised", 0, 0, "", rest(), "column", 8, 0, 0, "", 20, "#000000aa")
+
+    [hp, mana, xp, cell, cell_lit, cell_on, deck, mark_dir, mark_code, mark_run, mark_doc, twig, twig_lit, twig_on, fold, fold_lit, drawer, seg, seg_on, dial, dial_warm, dial_good, slot_key, sweep, tip, ontop, toast, carved, dock, grip, grip_lit, grip_on, dtab, dtab_lit, dtab_on, dropping, carried, landing, zone, zone_on, chip, chip_bad, chip_good, sunk_card, ghost_label, seam, area, area2, needle, ghosted, sky, fire, deep_grad, dusk, blk, blk2, blk3, soft, round, edged, raised]
+
+# --- saying it -------------------------------------------------------------
+
+# The state a control is in, as one word. Focus outranks hover: you want to
+# see where the keyboard is even while the mouse is somewhere else.
+# The state a control is in, as one word. Focus outranks hover: you want
+# to see where the keyboard is even while the pointer is somewhere else -
+# but only when the focus is one somebody needs pointing out.
+define state_of(g: Gallery, name: text, on: truth) -> text:
+    if on then "on" else if g.focus is name and g.show_focus then "focus" else if g.hover is name then "lit" else ""
+
+define add_label(ns: [Node], kind: text, words: text) -> [Node]:
+    append(ns, n(kind, [p("text", words)], []))
+
+define add_section(ns: [Node], words: text) -> [Node]:
+    a = add_label(ns, "head", words)
+    b = append(a, n("hair", [p("h", "1"), p("fill", "1")], []))
+    append(b, n("col", [p("gap", "8"), p("fill", "1")], [top(a), top(b)]))
+
+# A caption on the left and a control hard against the right, which is the
+# shape of every settings screen ever written. The air between them is what
+# does it - `grow` on nothing eats whatever is left over.
+define add_setting(ns: [Node], words: text, control: int) -> [Node]:
+    a = add_label(ns, "body", words)
+    b = append(a, n("air", [p("grow", "1")], []))
+    append(b, n("strip", [p("fill", "1"), p("gap", "10"), p("align", "center")], [top(a), top(b), control]))
+
+# --- buttons ---------------------------------------------------------------
+
+# ONE node, carrying its own words. A label inside a button was a second
+# node with the SAME role, so it painted the role's plate a second time -
+# a grey pill sitting inside the blue of a selected button. A node with
+# text and no children centres its own line, which is what a button is.
+define add_button(ns: [Node], g: Gallery, words: text, name: text, on: truth) -> [Node]:
+    append(ns, n("btn", [p("state", state_of(g, name, on)), p("do", name), p("text", words), p("h", "32"), p("pad", "14"), p("align", "center"), p("justify", "center")], []))
+
+# A button that is only an icon - the whole vocabulary of a toolbar, and of
+# a carousel's arrows.
+define icon_words(icon: text) -> text:
+    if icon is "minus" then "Minska" else if icon is "plus" then "Öka" else if icon is "chevron_left" then "Föregående" else if icon is "chevron_right" then "Nästa" else icon
+
+define add_icon_button(ns: [Node], g: Gallery, icon: text, name: text) -> [Node]:
+    a = append(ns, n("air", [p("icon", icon), p("w", "16"), p("h", "16")], []))
+    # An icon says nothing out loud, so it is given something to say.
+    append(a, n("btn", [p("state", state_of(g, name, false)), p("do", name), p("says", icon_words(icon)), p("w", "32"), p("h", "32"), p("align", "center"), p("justify", "center")], [top(a)]))
+
+define add_buttons(ns: [Node], g: Gallery) -> [Node]:
+    a = add_section(ns, "KNAPPAR OCH TILLSTÅND")
+    b = add_button(a, g, "Vanlig", "b1", false)
+    c = add_button(b, g, "Vald", "b2", true)
+    d = add_button(c, g, "Öppna dialog", "dialog", false)
+    e = add_button(d, g, "Meny", "open_menu", false)
+    # Two columns rather than one row: four buttons in a narrow panel had
+    # to give up so much width that their labels were cut.
+    g2 = append(e, n("col", [p("layout", "grid"), p("cols", "2"), p("gap", "10"), p("fill", "1")], [top(b), top(c), top(d), top(e)]))
+    picked = if g.picked_item is "" then "Högerklicka var som helst" else "Valde: {g.picked_item}"
+    h = append(g2, n("body", [p("text", picked)], []))
+    append(h, n("panel", [p("fill", "1")], [top(a), top(g2), top(h)]))
+
+# --- the tab bar -----------------------------------------------------------
+
+public define tab_names() -> [text] = ["kontroller", "layout", "innehall", "docka", "spel", "yta", "tema"]
+
+# Which pages have something moving in them of their own accord - a meter
+# read off the clock, a sweep, a curve. Written beside the list of pages so
+# the two are read together: a page that grows a moving thing has to be
+# named here, and a page that loses one has to leave.
+#
+# It is here rather than in the framework because only the app knows. Veil
+# can say whether something it is EASING is still on its way (motion_busy);
+# it cannot know that a bar is drawn from `seconds`.
+public define tab_moves(name: text) -> truth:
+    name is "kontroller" or name is "spel" or name is "yta"
+
+define tab_words(name: text) -> text:
+    if name is "kontroller" then "Kontroller" else if name is "layout" then "Layout" else if name is "innehall" then "Innehåll" else if name is "docka" then "Docka" else if name is "spel" then "Spel" else if name is "yta" then "Yta" else "Tema"
+
+define add_tab(ns: [Node], g: Gallery, name: text) -> [Node]:
+    on = g.tab is name
+    append(ns, n("tab", [p("state", state_of(g, "tab:{name}", on)), p("do", "tab:{name}"), p("text", tab_words(name)), p("radius", "8 8 0 0"), p("h", "30"), p("pad", "14"), p("align", "center"), p("justify", "center")], []))
+
+define add_tabs(ns: [Node], g: Gallery, names: [text], i: int, kids: [int]) -> [Node]:
+    if i >= length(names):
+        return append(ns, n("strip", [p("layout", "flow"), p("gap", "4"), p("fill", "1")], kids))
+    a = add_tab(ns, g, names[i])
+    add_tabs(a, g, names, i + 1, append(kids, top(a)))
+
+# --- things that hold a number ---------------------------------------------
+
+# A slider is three pieces in a row: the part that is filled, the knob, and
+# the part that is not. The filled part asks for a SHARE of the row, so the
+# framework works the pixels out - the document never divides anything.
+# A slider needs a width of its own: inside a row, `fill` is the CROSS
+# axis, so a track that only said `fill` came out as tall as the row and
+# no wider than its knob.
+define add_slider(ns: [Node], g: Gallery, name: text, val: int, kind: text) -> [Node]:
+    a = append(ns, n(kind, [p("w", "{val}%"), p("h", "5")], []))
+    b = append(a, n("knob", [p("w", "14"), p("h", "14")], []))
+    c = append(b, n("bar", [p("grow", "1"), p("h", "5")], []))
+    append(c, n("strip", [p("do", name), p("w", "170"), p("h", "22"), p("align", "center")], [top(a), top(b), top(c)]))
+
+# A bar you cannot drag. Same two roles, no knob - health, mana, progress.
+# `room` says whether it is in a row that has space to share ("grow") or a
+# column where growing would only make it taller.
+define add_bar(ns: [Node], kind: text, val: int, room: text) -> [Node]:
+    a = append(ns, n(kind, [p("w", "{val}%"), p("h", "8")], []))
+    wide = [p("h", "8"), p("fill", "1"), p("grow", "1")]
+    tall = [p("h", "8"), p("fill", "1")]
+    append(a, n("bar", if room is "grow" then wide else tall, [top(a)]))
+
+define add_named_bar(ns: [Node], words: text, kind: text, val: int) -> [Node]:
+    a = add_label(ns, "tiny", words)
+    b = add_bar(a, kind, val, "")
+    append(b, n("col", [p("gap", "4"), p("fill", "1")], [top(a), top(b)]))
+
+define add_switch(ns: [Node], g: Gallery) -> [Node]:
+    a = append(ns, n("knob", [p("w", "14"), p("h", "14")], []))
+    b = append(a, n("air", [p("grow", "1")], []))
+    kids = if g.lit then [top(b), top(a)] else [top(a), top(b)]
+    c = append(b, n("track", [p("state", if g.lit then "on" else ""), p("do", "switch"), p("w", "38"), p("h", "22"), p("align", "center")], kids))
+    d = add_label(c, "body", if g.lit then "På" else "Av")
+    append(d, n("strip", [p("gap", "10"), p("align", "center")], [top(c), top(d)]))
+
+define add_meter(ns: [Node], g: Gallery) -> [Node]:
+    part = 20 + to_whole(g.seconds * 12.0) % 70
+    # The fill says what SHARE of the track it wants and the layout works
+    # out the pixels. It used to be `part * 3`, which reaches 267 inside a
+    # 220-wide bar: the fill burst its own track, the row grew to hold it,
+    # and the label was pushed out through the side of the panel. A share
+    # cannot do that - it is a fraction of the thing that contains it.
+    a = add_bar(ns, "fill", part, "grow")
+    b = add_label(a, "body", "{part} %")
+    append(b, n("strip", [p("gap", "12"), p("fill", "1"), p("align", "center")], [top(a), top(b)]))
+
+# --- ticking, choosing, stepping -------------------------------------------
+
+define add_check(ns: [Node], g: Gallery, words: text, name: text, on: truth) -> [Node]:
+    tick = if on then "check" else ""
+    a = append(ns, n("chk", [p("state", if on then "on" else ""), p("w", "17"), p("h", "17"), p("icon", tick), p("align", "center"), p("justify", "center")], []))
+    b = add_label(a, "body", words)
+    append(b, n("strip", [p("do", name), p("gap", "9"), p("h", "22"), p("align", "center")], [top(a), top(b)]))
+
+define add_radio(ns: [Node], g: Gallery, words: text, name: text, on: truth) -> [Node]:
+    a = append(ns, n("dot", [p("w", "9"), p("h", "9"), p("show", if on then "1" else "0")], []))
+    b = append(a, n("rad", [p("state", if on then "on" else ""), p("w", "17"), p("h", "17"), p("align", "center"), p("justify", "center")], [top(a)]))
+    c = add_label(b, "body", words)
+    append(c, n("strip", [p("do", name), p("gap", "9"), p("h", "22"), p("align", "center")], [top(b), top(c)]))
+
+define add_radios(ns: [Node], g: Gallery, names: [text], i: int, kids: [int]) -> [Node]:
+    if i >= length(names):
+        # NOT a flow: this sits at the right-hand end of a settings row,
+        # where the room it gets is what it asked for, and a flow measured
+        # against the whole row then placed in its own width wraps to
+        # lines the row has no height for.
+        return append(ns, n("strip", [p("gap", "14"), p("align", "center")], kids))
+    a = add_radio(ns, g, names[i], "rad:{names[i]}", g.quality is names[i])
+    add_radios(a, g, names, i + 1, append(kids, top(a)))
+
+define add_stepper(ns: [Node], g: Gallery) -> [Node]:
+    a = add_icon_button(ns, g, "minus", "step:down")
+    b = add_label(a, "lead", "{g.steps}")
+    c = append(b, n("well", [p("w", "48"), p("h", "32"), p("align", "center"), p("justify", "center")], [top(b)]))
+    d = add_icon_button(c, g, "plus", "step:up")
+    append(d, n("strip", [p("gap", "6"), p("align", "center")], [top(a), top(c), top(d)]))
+
+# A dropdown is a button that says what is chosen and opens a menu. The
+# menu itself is the same raised sheet the right-click menu uses - one
+# mechanism, two places, no second implementation to keep in step.
+define add_dropdown(ns: [Node], g: Gallery, name: text, shown: text) -> [Node]:
+    a = append(ns, n("lead", [p("text", shown)], []))
+    b = append(a, n("air", [p("grow", "1")], []))
+    c = append(b, n("air", [p("icon", "chevron_down"), p("w", "14"), p("h", "14")], []))
+    append(c, n("btn", [p("state", state_of(g, name, g.menu is name)), p("do", name), p("w", "160"), p("h", "32"), p("pad", "12"), p("align", "center")], [top(a), top(b), top(c)]))
+
+# --- icons -----------------------------------------------------------------
+# Lucide's shapes, which are strokes, expanded into filled outlines by
+# atlas_icons. DrawIcon carries no colour, so they paint chrome-grey.
+
+define icon_names() -> [text]:
+    ["check", "x", "plus", "minus", "chevron_left", "chevron_right", "chevron_up", "chevron_down", "arrow_left", "arrow_right", "arrow_up", "arrow_down", "trash", "copy", "folder", "file", "play", "pause", "bell", "user", "lock", "settings", "search", "menu", "star", "heart", "circle", "triangle", "diamond", "close"]
+
+define add_icons(ns: [Node], names: [text], i: int, cols: text, kids: [int]) -> [Node]:
+    if i >= length(names):
+        # A grid, not a row: a palette of icons wants its columns to line
+        # up down the page, and a row cannot do that.
+        return append(ns, n("col", [p("layout", "grid"), p("cols", cols), p("gap", "10"), p("fill", "1")], kids))
+    a = append(ns, n("air", [p("icon", names[i]), p("w", "18"), p("h", "18")], []))
+    add_icons(a, names, i + 1, cols, append(kids, top(a)))
+
+define add_icon_row(ns: [Node], g: Gallery) -> [Node]:
+    a = add_section(ns, "IKONER")
+    b = add_icons(a, icon_names(), 0, "8", [])
+    append(b, n("panel", [p("fill", "1")], [top(a), top(b)]))
+
+# --- a scrolling list ------------------------------------------------------
+
+define row_words(i: int) -> text:
+    "Rad {i + 1} - en rad vars namn är alldeles för långt för spalten den bor i och därför måste kortas"
+
+define add_rows(ns: [Node], g: Gallery, i: int, count: int, kids: [int]) -> [Node]:
+    if i >= count:
+        return append(ns, n("col", [p("gap", "2"), p("fill", "1")], kids))
+    name = "row{i}"
+    a = append(ns, n("pip", [p("state", if g.chosen is i then "on" else ""), p("w", "6"), p("h", "6")], []))
+    b = add_label(a, "row", row_words(i))
+    c = append(b, n("row", [p("state", state_of(g, name, g.chosen is i)), p("do", name), p("h", "26"), p("pad", "10"), p("fill", "1"), p("align", "center")], [top(a), top(b)]))
+    add_rows(c, g, i + 1, count, append(kids, top(c)))
+
+public define row_count() -> int = 10000
+
+define row_high() -> int = 28
+
+define add_rows_from(ns: [Node], g: Gallery, i: int, last: int, kids: [int]) -> [Node]:
+    if i >= last:
+        return append(ns, n("col", [p("gap", "2"), p("fill", "1")], kids))
+    name = "row{i}"
+    a = append(ns, n("pip", [p("state", if g.chosen is i then "on" else ""), p("w", "6"), p("h", "6")], []))
+    b = append(a, n("row", [p("text", row_words(i)), p("trim", "1"), p("grow", "1")], []))
+    c = append(b, n("row", [p("state", state_of(g, name, g.chosen is i)), p("do", name), p("h", "26"), p("pad", "10"), p("fill", "1"), p("align", "center")], [top(a), top(b)]))
+    add_rows_from(c, g, i + 1, last, append(kids, top(c)))
+
+define add_list(ns: [Node], g: Gallery) -> [Node]:
+    a = add_section(ns, "LISTA SOM SCROLLAR")
+    # Ten thousand rows, of which about a dozen exist.
+    win = row_window(row_count(), row_high(), 150, g.scroll)
+    rows = add_rows_from(a, g, win.first, win.first + win.count, [])
+    # The box says how many rows there ARE, how tall one is, and which one
+    # the first of these is. veil puts them where their indices belong and
+    # reports the whole list's height - so no empty spacer has to stand in
+    # for the rest, and there is no wrapper column to hold the three of them.
+    #
+    # Named, so the ring can ask which box it is standing in. A box nobody
+    # can name is a box nothing can be scrolled into view inside.
+    c = append(rows, n("well", [p("id", "list"), p("rows", "{row_count()}"), p("row_h", "{row_high()}"), p("from", "{win.first}"), p("gap", "2"), p("h", "150"), p("fill", "1"), p("clip", "1"), p("scrollbar", "1"), p("scroll_y", "{g.scroll}")], [top(rows)]))
+    d = add_label(c, "tiny", "{row_count()} RADER, VARAV {win.count} FINNS")
+    append(d, n("panel", [p("fill", "1")], [top(a), top(c), top(d)]))
+
+# --- a paragraph that has to wrap ------------------------------------------
+
+define add_prose(ns: [Node], g: Gallery) -> [Node]:
+    words = "Den här texten är längre än sin spalt och måste brytas av ramverket, inte av den som skrev den. Mätningen och ritningen bryter på samma ställe, så en centrerad rad hamnar där den ser ut att hamna."
+    a = add_section(ns, "TEXT SOM BRYTS")
+    b = append(a, n("lead", [p("text", words), p("wrap", "1"), p("fill", "1")], []))
+    append(b, n("panel", [p("fill", "1")], [top(a), top(b)]))
+
+# --- a text field ----------------------------------------------------------
+
+# The caret is drawn BETWEEN the two halves of the line, so the layout puts
+# it exactly where it belongs - measured, not estimated - and it works in
+# the middle of a word as readily as at the end.
+# A note of several lines. The document says WHAT the text is and WHERE
+# the caret is in it, and nothing else - the caret's place on the screen
+# depends on where the lines broke, and only the thing that broke them
+# knows that.
+# Text on its way in, spliced at the caret. The letters are IN the note
+# while they are being composed - so they measure, wrap and move the caret
+# exactly like settled text - and veil underlines the stretch to say they
+# are not settled yet.
+define spliced(whole: text, at: number, put: text) -> text:
+    b = bytes_of(whole)
+    n_all = bytes_count(b)
+    cut = if at < 0 then 0 else if at > n_all then n_all else at
+    "{text_of(bytes_part(b, 0, cut))}{put}{text_of(bytes_part(b, cut, n_all))}"
+
+define add_note(ns: [Node], g: Gallery) -> [Node]:
+    a = add_section(ns, "FLERA RADER")
+    # The platform answers this on both targets: Windows through its IME
+    # messages, a browser through its composition events.
+    coming = if g.noting then composing() else ""
+    shown = if coming is "" then g.note else spliced(g.note, g.note_at, coming)
+    care = if coming is "" then g.note_at else g.note_at + length(coming)
+    b = append(a, n("lead", [p("text", shown), p("wrap", "1"), p("fill", "1"), p("caret", "{care}"), p("anchor", if coming is "" then "{g.note_to}" else "{care}"), p("compose_from", if coming is "" then "-1" else "{g.note_at}"), p("compose_to", if coming is "" then "-1" else "{care}"), p("lit", if g.noting and caret_lit(g.seconds) then "1" else "0")], []))
+    c = append(b, n("well", [p("state", if g.noting then "focus" else ""), p("do", "note"), p("h", "110"), p("pad", "10"), p("fill", "1"), p("clip", "1")], [top(b)]))
+    d = add_label(c, "tiny", "ENTER BRYTER RAD, PILARNA GÅR UPP OCH NER")
+    append(d, n("panel", [p("fill", "1")], [top(a), top(c), top(d)]))
+
+define add_field(ns: [Node], g: Gallery) -> [Node]:
+    a = add_section(ns, "INMATNING")
+    empty = g.before is "" and g.after is ""
+    hint = if empty and not g.typing then "Skriv något långt här" else ""
+    blink = g.typing and caret_lit(g.seconds)
+    b = append(a, n("lead", [p("text", g.before)], []))
+    c = append(b, n("caret", [p("w", "2"), p("h", "17"), p("show", if blink then "1" else "0")], []))
+    d = append(c, n("picked", [p("text", g.picked), p("show", if g.picked is "" then "0" else "1")], []))
+    e = append(d, n("lead", [p("text", g.after)], []))
+    f = append(e, n("ghost", [p("text", hint)], []))
+    h = append(f, n("field", [p("state", if g.typing then "focus" else ""), p("do", "field"), p("h", "38"), p("pad", "12"), p("fill", "1"), p("align", "center"), p("clip", "1"), p("scroll_x", "end")], [top(b), top(c), top(d), top(e), top(f)]))
+    append(h, n("panel", [p("fill", "1")], [top(a), top(h)]))
+
+# --- page one: controls ----------------------------------------------------
+
+define add_pickers(ns: [Node], g: Gallery) -> [Node]:
+    a = add_section(ns, "VÄLJA")
+    b = add_check(a, g, "Vsync", "chk:vsync", g.vsync)
+    c = add_check(b, g, "Undertexter", "chk:subs", g.subs)
+    d = add_radios(c, g, quality_names(), 0, [])
+    e = add_stepper(d, g)
+    f = add_setting(e, "Antal", top(e))
+    append(f, n("panel", [p("fill", "1")], [top(a), top(b), top(c), top(d), top(f)]))
+
+# One control for the size of everything. Not a font size and not a
+# widget setting - it is the number veil multiplies every length by, so
+# padding, corners, borders, icons and text all move together.
+define add_zoom(ns: [Node], g: Gallery, words: text, per: int) -> [Node]:
+    append(ns, n("btn", [p("state", state_of(g, "zoom{per}", g.zoom is per)), p("do", "zoom{per}"), p("text", words), p("h", "28"), p("pad", "10"), p("grow", "1"), p("align", "center"), p("justify", "center")], []))
+
+define add_sizes(ns: [Node], g: Gallery) -> [Node]:
+    a = add_section(ns, "STORLEK PÅ ALLT")
+    b = add_zoom(a, g, "Liten", 85)
+    c = add_zoom(b, g, "Normal", 100)
+    d = add_zoom(c, g, "Stor", 125)
+    e = add_zoom(d, g, "Störst", 150)
+    f = append(e, n("strip", [p("layout", "flow"), p("gap", "6"), p("fill", "1")], [top(b), top(c), top(d), top(e)]))
+    lt = add_check(f, g, "Ljust läge", "bright", g.bright)
+    k = add_check(lt, g, "Hög kontrast", "contrast", g.contrast)
+    bx = add_check(k, g, "Visa lådorna", "boxes", g.boxes)
+    tst = add_button(bx, g, "Visa en notis", "toast", false)
+    h = append(tst, n("body", [p("text", "Skärmen sätter storleken vid start; det här flyttar den."), p("wrap", "1"), p("fill", "1")], []))
+    append(h, n("panel", [p("fill", "1")], [top(a), top(f), top(lt), top(k), top(bx), top(tst), top(h)]))
+
+define add_controls(ns: [Node], g: Gallery) -> [Node]:
+    a = add_section(ns, "REGLAGE")
+    b = add_switch(a, g)
+    c = add_slider(b, g, "slider", g.slider, "fill")
+    d = add_label(c, "body", "{g.slider} %")
+    e = append(d, n("strip", [p("gap", "12"), p("fill", "1"), p("align", "center")], [top(c), top(d)]))
+    f = add_meter(e, g)
+    append(f, n("panel", [p("fill", "1")], [top(a), top(b), top(e), top(f)]))
+
+define page_controls(ns: [Node], g: Gallery) -> [Node]:
+    b = add_buttons(ns, g)
+    c = add_controls(b, g)
+    pk = add_pickers(c, g)
+    sz = add_sizes(pk, g)
+    lft = append(sz, n("col", [p("gap", "14"), p("w", "320"), p("fill", "1")], [top(b), top(c), top(pk), top(sz)]))
+
+    l = add_list(lft, g)
+    pr = add_prose(l, g)
+    fl = add_field(pr, g)
+    nt = add_note(fl, g)
+    rgt = append(nt, n("col", [p("gap", "14"), p("grow", "1"), p("fill", "1")], [top(l), top(pr), top(fl), top(nt)]))
+
+    append(rgt, n("strip", [p("gap", "14"), p("grow", "1"), p("fill", "1")], [top(lft), top(rgt)]))
+
+# --- a table ---------------------------------------------------------------
+# A header that stays put while the body scrolls, columns you can sort by
+# clicking, a name column that shortens itself and a number column pushed
+# to the right. Every app has one and none of it needed anything new: the
+# header is simply outside the box that scrolls.
+
+define table_rows() -> int = 14
+
+define cell_name(i: int) -> text:
+    heads = ["Beskrivning av posten", "En rad med ett längre namn än spalten", "Kort", "Ännu en post i listan", "Namnet på det femte", "Sjätte posten"]
+    "{heads[i % 6]} {i + 1}"
+
+define cell_size(i: int) -> int:
+    (i * 37 + 11) % 90 + 4
+
+define cell_state(i: int) -> text:
+    if i % 3 is 0 then "Klar" else if i % 3 is 1 then "Väntar" else "Fel"
+
+# The rows in the order the header asked for. A selection sort because a
+# table on screen is tens of rows, not thousands - and the one that IS
+# thousands is virtualised and sorted by whoever owns the data.
+define row_order(g: Gallery, taken: [int], out: [int]) -> [int]:
+    if length(out) >= table_rows():
+        return out
+    edit best = 0 - 1
+    edit best_key = 0
+    loop i in 0 until table_rows():
+        edit already = false
+        loop t in taken:
+            if t is i:
+                already = true
+        if not already:
+            key = sort_key(g, i)
+            if best < 0 or (if g.sort_up then key < best_key else key > best_key):
+                best = i
+                best_key = key
+    row_order(g, append(taken, best), append(out, best))
+
+define sort_key(g: Gallery, i: int) -> int:
+    if g.sort_by is "storlek":
+        return cell_size(i)
+    if g.sort_by is "läge":
+        return i % 3 * 1000 + i
+    i
+
+define add_head_cell(ns: [Node], g: Gallery, words: text, key: text, room: text) -> [Node]:
+    on = g.sort_by is key
+    mark = if not on then "" else if g.sort_up then "chevron_up" else "chevron_down"
+    a = add_label(ns, if on then "lead" else "head", words)
+    b = append(a, n("air", [p("icon", mark), p("w", "11"), p("h", "11")], []))
+    props = if room is "" then [p("state", state_of(g, "sort:{key}", false)), p("do", "sort:{key}"), p("grow", "1"), p("h", "26"), p("gap", "5"), p("align", "center")] else [p("state", state_of(g, "sort:{key}", false)), p("do", "sort:{key}"), p("w", room), p("h", "26"), p("gap", "5"), p("align", "center")]
+    append(b, n("row", props, [top(a), top(b)]))
+
+define add_table_head(ns: [Node], g: Gallery) -> [Node]:
+    a = add_head_cell(ns, g, "NAMN", "namn", "")
+    b = add_head_cell(a, g, "STORLEK", "storlek", "90")
+    c = add_head_cell(b, g, "LÄGE", "läge", "80")
+    d = append(c, n("strip", [p("gap", "10"), p("fill", "1"), p("pad", "8")], [top(a), top(b), top(c)]))
+    e = append(d, n("hair", [p("h", "1"), p("fill", "1")], []))
+    append(e, n("col", [p("fill", "1")], [top(d), top(e)]))
+
+define add_table_row(ns: [Node], g: Gallery, i: int) -> [Node]:
+    a = append(ns, n("row", [p("text", cell_name(i)), p("trim", "1"), p("grow", "1")], []))
+    b = append(a, n("row", [p("text", "{cell_size(i)} kB"), p("align", "end"), p("w", "90")], []))
+    c = append(b, n("row", [p("text", cell_state(i)), p("w", "80")], []))
+    append(c, n("row", [p("state", state_of(g, "trow{i}", g.chosen is i)), p("do", "trow{i}"), p("h", "26"), p("pad", "8"), p("gap", "10"), p("fill", "1"), p("align", "center")], [top(a), top(b), top(c)]))
+
+define add_table_body(ns: [Node], g: Gallery, order: [int], i: int, kids: [int]) -> [Node]:
+    if i >= length(order):
+        return append(ns, n("col", [p("gap", "1"), p("fill", "1")], kids))
+    a = add_table_row(ns, g, order[i])
+    add_table_body(a, g, order, i + 1, append(kids, top(a)))
+
+define add_table(ns: [Node], g: Gallery) -> [Node]:
+    a = add_section(ns, "TABELL")
+    h = add_table_head(a, g)
+    b = add_table_body(h, g, row_order(g, [], []), 0, [])
+    # The header is OUTSIDE the box that scrolls, which is the whole of
+    # what "sticky" means and needs nothing from the framework.
+    c = append(b, n("air", [p("do", "table"), p("h", "170"), p("fill", "1"), p("clip", "1"), p("scrollbar", "1"), p("scroll_y", "{g.table_at}")], [top(b)]))
+    append(c, n("panel", [p("fill", "1")], [top(a), top(h), top(c)]))
+
+# --- page two: layout ------------------------------------------------------
+# Every arrangement the resolver knows, side by side, so a change that
+# breaks one is visible against the others.
+
+define add_blocks(ns: [Node], kinds: [text], words: [text], i: int, kids: [int], holder: [NodeProp]) -> [Node]:
+    if i >= length(kinds):
+        return append(ns, n("col", holder, kids))
+    a = append(ns, n(kinds[i], [p("text", words[i]), p("w", "58"), p("h", "34"), p("align", "center"), p("justify", "center")], []))
+    add_blocks(a, kinds, words, i + 1, append(kids, top(a)), holder)
+
+define three() -> [text] = ["blk", "blk2", "blk3"]
+
+define add_demo(ns: [Node], words: text, holder: [NodeProp]) -> [Node]:
+    a = add_label(ns, "tiny", words)
+    b = add_blocks(a, three(), ["ett", "två", "tre"], 0, [], holder)
+    c = append(b, n("well", [p("pad", "8"), p("h", "62"), p("fill", "1"), p("clip", "1")], [top(b)]))
+    append(c, n("col", [p("gap", "5"), p("fill", "1")], [top(a), top(c)]))
+
+define add_flow(ns: [Node], g: Gallery) -> [Node]:
+    a = add_section(ns, "RIKTNING")
+    b = add_demo(a, "layout: row", [p("layout", "row"), p("gap", "8"), p("fill", "1")])
+    c = add_demo(b, "layout: column - staplade, och brunnen klipper resten", [p("gap", "4"), p("fill", "1")])
+    d = add_demo(c, "layout: grid, cols: 2", [p("layout", "grid"), p("cols", "2"), p("gap", "8"), p("fill", "1")])
+    e = add_demo(d, "layout: stack - samma ruta, sista överst", [p("layout", "stack"), p("fill", "1")])
+    append(e, n("panel", [p("fill", "1")], [top(a), top(b), top(c), top(d), top(e)]))
+
+define add_spacing(ns: [Node], g: Gallery) -> [Node]:
+    a = add_section(ns, "FÖRDELNING")
+    b = add_demo(a, "justify: start", [p("layout", "row"), p("gap", "8"), p("fill", "1")])
+    c = add_demo(b, "justify: center", [p("layout", "row"), p("gap", "8"), p("fill", "1"), p("justify", "center")])
+    d = add_demo(c, "justify: end", [p("layout", "row"), p("gap", "8"), p("fill", "1"), p("justify", "end")])
+    e = add_demo(d, "justify: between", [p("layout", "row"), p("gap", "8"), p("fill", "1"), p("justify", "between")])
+    f = add_demo(e, "align: end - varje ruta kryper till botten av sin rad", [p("layout", "row"), p("gap", "8"), p("fill", "1"), p("align", "end")])
+    append(f, n("panel", [p("fill", "1")], [top(a), top(b), top(c), top(d), top(e), top(f)]))
+
+define page_layout(ns: [Node], g: Gallery) -> [Node]:
+    a = add_flow(ns, g)
+    tb = add_table(a, g)
+    lft = append(tb, n("col", [p("gap", "14"), p("grow", "1"), p("fill", "1")], [top(a), top(tb)]))
+    c = add_spacing(lft, g)
+    mid = append(c, n("col", [p("gap", "14"), p("grow", "1"), p("fill", "1")], [top(c)]))
+    d = add_list(mid, g)
+    e = add_prose(d, g)
+    rgt = append(e, n("col", [p("gap", "14"), p("w", "320"), p("fill", "1")], [top(d), top(e)]))
+    append(rgt, n("strip", [p("gap", "14"), p("grow", "1"), p("fill", "1")], [top(lft), top(mid), top(rgt)]))
+
+
+# --- page three: content that folds, opens and slides ----------------------
+# Everything here is one idea used four ways: a box whose height or width
+# the document sets, with `ease` so the box travels rather than blinks and
+# `clip` so what is inside does not spill while it is on its way.
+
+define is_open(g: Gallery, name: text) -> truth:
+    edit yes = false
+    loop w in split(g.open, "|"):
+        if w is name:
+            yes = true
+    yes
+
+# --- a tree ----------------------------------------------------------------
+# A row per branch, indented by its depth, with a chevron that turns. The
+# children of a shut branch are still BUILT - they sit in a box with no
+# height, which is what lets the branch fold rather than vanish.
+
+define tree_born(name: text) -> [text]:
+    if name is "src" then ["main.or", "lib.or", "veil"] else if name is "veil" then ["resolver", "motion"] else if name is "bygg" then ["orbit.exe", "veil.exe"] else []
+
+# Where a row lives NOW: where it was born, unless it has been carried
+# somewhere else since.
+define lives_in(g: Gallery, leaf: text) -> text:
+    edit where = ""
+    loop pair in split(g.moved, "|"):
+        parts = split(pair, ">")
+        if length(parts) is 2 and parts[0] is leaf:
+            where = parts[1]
+    where
+
+public define tree_kids(g: Gallery, name: text) -> [text]:
+    edit out = []
+    loop k in tree_born(name):
+        if lives_in(g, k) is "":
+            out = append(out, k)
+    # And anything carried in from somewhere else.
+    loop other in ["src", "veil", "bygg"]:
+        loop k in tree_born(other):
+            if lives_in(g, k) is name:
+                out = append(out, k)
+    out
+
+# What kind of thing a name is, by how it ends - which is how a file tree
+# has always known.
+define kind_of(name: text, branch: truth) -> text:
+    if branch then "mark:dir" else if ends_with(name, ".or") then "mark:code" else if ends_with(name, ".exe") then "mark:run" else "mark:doc"
+
+define is_branch(name: text) -> truth:
+    name is "src" or name is "veil" or name is "bygg"
+
+define add_twig(ns: [Node], g: Gallery, name: text, depth: int) -> [Node]:
+    open = is_open(g, name)
+    # The row being carried, and the gap it would drop into, exactly as
+    # the dock does it - one gesture, one look, wherever you use it.
+    lifting = g.carrying is name
+    shut_mark = if open then "chevron_down" else "chevron_right"
+    mark = if is_branch(name) then shut_mark else "file"
+    a = append(ns, n("air", [p("w", "{depth * 16 + 1}")], []))
+    b = append(a, n(kind_of(name, is_branch(name)), [p("icon", mark), p("w", "13"), p("h", "13")], []))
+    c = add_label(b, "twig", name)
+    dropping_here = g.carrying is not "" and g.over is "twig:{name}" and is_branch(name)
+    skin = if lifting then "ghosted" else if dropping_here then "dropping" else "twig"
+    append(c, n(skin, [p("state", state_of(g, "twig:{name}", false)), p("do", "twig:{name}"), p("h", "24"), p("pad", "6"), p("fill", "1"), p("align", "center")], [top(a), top(b), top(c)]))
+
+define add_branch(ns: [Node], g: Gallery, name: text, depth: int, kids: [text], i: int, inner: [int]) -> [Node]:
+    if i >= length(kids):
+        # Open says NOTHING about height, so the box is as tall as what is
+        # in it; shut says zero. `ease` travels between the two, so the
+        # document never works out a pixel and a branch of branches is as
+        # tall as it needs to be.
+        shut = [p("id", "tree:{name}"), p("ease", "1"), p("clip", "1"), p("h", "0"), p("gap", "2"), p("fill", "1")]
+        wide_open = [p("id", "tree:{name}"), p("ease", "1"), p("clip", "1"), p("gap", "2"), p("fill", "1")]
+        return append(ns, n("col", if is_open(g, name) then wide_open else shut, inner))
+    kid = kids[i]
+    a = add_tree(ns, g, kid, depth + 1)
+    add_branch(a, g, name, depth, kids, i + 1, append(inner, top(a)))
+
+define add_tree(ns: [Node], g: Gallery, name: text, depth: int) -> [Node]:
+    row = add_twig(ns, g, name, depth)
+    if not is_branch(name):
+        return row
+    held = add_branch(row, g, name, depth, tree_kids(g, name), 0, [])
+    append(held, n("col", [p("gap", "2"), p("fill", "1")], [top(row), top(held)]))
+
+define add_tree_panel(ns: [Node], g: Gallery) -> [Node]:
+    a = add_section(ns, "TRÄD")
+    b = add_tree(a, g, "src", 0)
+    c = add_tree(b, g, "bygg", 0)
+    append(c, n("panel", [p("fill", "1")], [top(a), top(b), top(c)]))
+
+# --- sections that fold ----------------------------------------------------
+
+define fold_words(i: int) -> text:
+    if i is 0 then "Höjden är noll när sektionen är stängd, och ramverket låter den resa dit i stället för att blinka." else if i is 1 then "Allt under glider upp med den, för storleken som föräldern flödar med är den som är på väg." else "Den här har mer text i sig, så höjden skiljer sig från de andra två och var och en reser sin egen sträcka."
+
+define add_fold(ns: [Node], g: Gallery, i: int) -> [Node]:
+    name = "fold{i}"
+    open = is_open(g, name)
+    a = append(ns, n("air", [p("icon", if open then "chevron_down" else "chevron_right"), p("w", "13"), p("h", "13")], []))
+    head = append(a, n("fold", [p("state", state_of(g, name, false)), p("do", name), p("text", "Sektion {i + 1}"), p("h", "32"), p("pad", "34"), p("fill", "1"), p("align", "center")], [top(a)]))
+    words = append(head, n("body", [p("text", fold_words(i)), p("wrap", "1"), p("fill", "1")], []))
+    shut = [p("id", "foldbody{i}"), p("ease", "1"), p("clip", "1"), p("h", "0"), p("pad", "8"), p("fill", "1")]
+    wide_open = [p("id", "foldbody{i}"), p("ease", "1"), p("clip", "1"), p("pad", "8"), p("fill", "1")]
+    body = append(words, n("col", if open then wide_open else shut, [top(words)]))
+    append(body, n("col", [p("gap", "4"), p("fill", "1")], [top(head), top(body)]))
+
+define add_folds(ns: [Node], g: Gallery, i: int, kids: [int]) -> [Node]:
+    if i >= 3:
+        return append(ns, n("col", [p("gap", "8"), p("fill", "1")], kids))
+    a = add_fold(ns, g, i)
+    add_folds(a, g, i + 1, append(kids, top(a)))
+
+define add_accordion(ns: [Node], g: Gallery) -> [Node]:
+    a = add_section(ns, "SEKTIONER SOM FÄLLS")
+    b = add_folds(a, g, 0, [])
+    append(b, n("panel", [p("fill", "1")], [top(a), top(b)]))
+
+# --- a panel that slides in ------------------------------------------------
+
+define add_drawer(ns: [Node], g: Gallery) -> [Node]:
+    a = add_section(ns, "PANEL SOM GLIDER IN")
+    b = add_button(a, g, if g.drawer then "Stäng lådan" else "Öppna lådan", "drawer", g.drawer)
+    c = add_label(b, "lead", "En låda")
+    e = append(c, n("body", [p("text", "Bredden är noll när den är stängd. Lådan tar sin plats ur raden den ligger i, precis som den skulle om den alltid varit där."), p("wrap", "1"), p("fill", "1")], []))
+    shut = [p("id", "drawer"), p("ease", "1"), p("clip", "1"), p("w", "0"), p("fill", "1")]
+    wide_open = [p("id", "drawer"), p("ease", "1"), p("clip", "1"), p("w", "210"), p("fill", "1")]
+    box = append(e, n("drawer", if g.drawer then wide_open else shut, [top(c), top(e)]))
+    rest = append(box, n("well", [p("grow", "1"), p("fill", "1")], []))
+    row = append(rest, n("strip", [p("gap", "12"), p("h", "150"), p("fill", "1")], [top(rest), top(box)]))
+    append(row, n("panel", [p("fill", "1")], [top(a), top(b), top(row)]))
+
+# --- every shape of progress -----------------------------------------------
+
+define add_segments(ns: [Node], part: int, i: int, kids: [int]) -> [Node]:
+    if i >= 10:
+        return append(ns, n("strip", [p("gap", "4"), p("fill", "1")], kids))
+    a = append(ns, n("seg", [p("state", if part > i * 10 then "on" else ""), p("grow", "1"), p("h", "10")], []))
+    add_segments(a, part, i + 1, append(kids, top(a)))
+
+# Of unknown length: a chunk that walks its track and turns round at each
+# end, for the wait nobody can put a number on.
+define add_creep(ns: [Node], g: Gallery) -> [Node]:
+    swing = to_whole(g.seconds * 40.0) % 140
+    at_x = if swing > 70 then 140 - swing else swing
+    a = append(ns, n("air", [p("w", "{at_x}%")], []))
+    b = append(a, n("mana", [p("w", "30%"), p("h", "8")], []))
+    c = append(b, n("air", [p("grow", "1")], []))
+    append(c, n("bar", [p("h", "8"), p("fill", "1"), p("layout", "row")], [top(a), top(b), top(c)]))
+
+define add_meters(ns: [Node], g: Gallery) -> [Node]:
+    part = 20 + to_whole(g.seconds * 12.0) % 70
+    a = add_section(ns, "MÄTARE")
+    b = add_named_bar(a, "VANLIG", "fill", part)
+    c = add_label(b, "tiny", "DELAD I TIO")
+    d = add_segments(c, part, 0, [])
+    e = append(d, n("col", [p("gap", "4"), p("fill", "1")], [top(c), top(d)]))
+    f = add_label(e, "tiny", "OKÄND LÄNGD")
+    h = add_creep(f, g)
+    i = append(h, n("col", [p("gap", "4"), p("fill", "1")], [top(f), top(h)]))
+    j = add_label(i, "tiny", "TRE PÅ SAMMA SPÅR")
+    k = append(j, n("hp", [p("w", "30%"), p("h", "10")], []))
+    l = append(k, n("mana", [p("w", "25%"), p("h", "10")], []))
+    m = append(l, n("xp", [p("w", "20%"), p("h", "10")], []))
+    o = append(m, n("bar", [p("h", "10"), p("fill", "1"), p("layout", "row")], [top(k), top(l), top(m)]))
+    q = append(o, n("col", [p("gap", "4"), p("fill", "1")], [top(j), top(o)]))
+    append(q, n("panel", [p("fill", "1")], [top(a), top(b), top(e), top(i), top(q)]))
+
+# A ring says a SHARE and the framework works out the angle. The words in
+# the middle are the node's own - a ring is one node, not a stack of them.
+define add_dial(ns: [Node], kind: text, part: int, thick: text, side: text) -> [Node]:
+    append(ns, n(kind, [p("ring", "{part}"), p("thick", thick), p("w", side), p("h", side), p("text", "{part}%"), p("align", "center"), p("justify", "center")], []))
+
+define add_dials(ns: [Node], g: Gallery) -> [Node]:
+    part = 20 + to_whole(g.seconds * 12.0) % 70
+    a = add_section(ns, "RADIELLA")
+    b = add_dial(a, "dial", part, "9", "78")
+    c = add_dial(b, "warm", 100 - part, "5", "78")
+    d = add_dial(c, "cool", 64, "16", "78")
+    e = append(d, n("strip", [p("gap", "14"), p("fill", "1"), p("justify", "between")], [top(b), top(c), top(d)]))
+    append(e, n("panel", [p("fill", "1")], [top(a), top(e)]))
+
+# A hotbar: the key underneath, the icon on it, and the cooldown swept
+# over the top as a filled wedge. Every action bar in every game.
+define hot_icons() -> [text] = ["star", "heart", "diamond", "bell", "lock"]
+
+define cool_left(g: Gallery, i: int) -> int:
+    turn = to_whole(g.seconds * 30.0 + to_real(i * 40)) % 200
+    if turn > 100 then 0 else 100 - turn
+
+define add_hot(ns: [Node], g: Gallery, names: [text], i: int, kids: [int]) -> [Node]:
+    if i >= length(names):
+        return append(ns, n("strip", [p("layout", "flow"), p("gap", "8"), p("fill", "1")], kids))
+    left = cool_left(g, i)
+    a = append(ns, n("air", [p("icon", names[i]), p("w", "22"), p("h", "22")], []))
+    b = append(a, n("sweep", [p("ring", "{left}"), p("thick", "30"), p("w", "54"), p("h", "54")], []))
+    c = append(b, n("hot", [p("layout", "stack"), p("do", "hot{i}"), p("w", "54"), p("h", "54"), p("align", "center"), p("justify", "center")], [top(a), top(b)]))
+    add_hot(c, g, names, i + 1, append(kids, top(c)))
+
+define add_hotbar(ns: [Node], g: Gallery) -> [Node]:
+    a = add_section(ns, "HOTBAR MED NEDKYLNING")
+    b = add_hot(a, g, hot_icons(), 0, [])
+    append(b, n("panel", [p("fill", "1")], [top(a), top(b)]))
+
+# A chart is a filled outline: the points along the top, then back along
+# the baseline. Written in parts per thousand of the box it lives in, so
+# it is the same chart at any size and the document never sees a pixel.
+define curve_of(seed: int, seconds: number) -> text:
+    edit out = ""
+    edit i = 0
+    loop:
+        if i > 10:
+            break
+        x = i * 100
+        wave = 500 + to_whole(to_real(300) * sine_at(to_real(i) * 0.7 + seconds * 0.6 + to_real(seed)))
+        out = if out is "" then "{x},{1000 - wave}" else "{out} {x},{1000 - wave}"
+        i = i + 1
+    "0,1000 {out} 1000,1000"
+
+# A wave without a maths orb: three terms of the series is plenty for a
+# line that only has to look alive.
+define sine_at(t: number) -> number:
+    x = t - to_real(to_whole(t / 6.2831853) ) * 6.2831853
+    w = if x > 3.14159 then x - 6.2831853 else x
+    w - w * w * w / 6.0 + w * w * w * w * w / 120.0
+
+define add_charts(ns: [Node], g: Gallery) -> [Node]:
+    a = add_section(ns, "DIAGRAM")
+    b = append(a, n("area", [p("shape", curve_of(0, g.seconds)), p("fill", "1"), p("grow", "1")], []))
+    c = append(b, n("area2", [p("shape", curve_of(3, g.seconds)), p("fill", "1"), p("grow", "1")], []))
+    d = append(c, n("well", [p("h", "120"), p("fill", "1"), p("layout", "stack")], [top(b), top(c)]))
+    e = add_label(d, "tiny", "FYLLDA FORMER AV TRIANGLAR, I TUSENDELAR AV SIN EGEN RUTA")
+    append(e, n("panel", [p("fill", "1")], [top(a), top(d), top(e)]))
+
+define page_content(ns: [Node], g: Gallery) -> [Node]:
+    a = add_tree_panel(ns, g)
+    b = add_meters(a, g)
+    lft = append(b, n("col", [p("gap", "14"), p("w", "340"), p("fill", "1")], [top(a), top(b)]))
+    ch = add_charts(lft, g)
+    c = add_accordion(ch, g)
+    d = add_dials(c, g)
+    h = add_hotbar(d, g)
+    e = add_drawer(h, g)
+    rgt = append(e, n("col", [p("gap", "14"), p("grow", "1"), p("fill", "1")], [top(ch), top(c), top(d), top(h), top(e)]))
+    append(rgt, n("strip", [p("gap", "14"), p("grow", "1"), p("fill", "1")], [top(lft), top(rgt)]))
+
+
+# --- page four: docking ----------------------------------------------------
+# Panels in two groups behind tabs, a line between the groups you drag to
+# give one of them more room, a console below on its own draggable line,
+# and a tab you can carry from one group to the other.
+#
+# None of it needed anything new from the framework. The layout already
+# says where every box ended up, and a drag is nothing but a name plus how
+# far the pointer has moved since it took hold of it. A dock is a layout
+# problem, not a widget.
+
+public define dock_panels() -> [text] = ["Utforskare", "Sök", "Konsol", "Problem"]
+
+public define panel_icon(name: text) -> text:
+    if name is "Utforskare" then "folder" else if name is "Sök" then "search" else if name is "Konsol" then "play" else "bell"
+
+define panel_words(name: text) -> text:
+    if name is "Utforskare" then "Ett träd av filer skulle bo här. Dra fliken mot en kant för att öppna en ny grupp." else if name is "Sök" then "Träffar skulle listas här. Linjerna mellan grupperna går att dra." else if name is "Konsol" then "Utskrifter skulle rulla förbi här." else "Varningar och fel skulle stå här."
+
+# --- the plan ---------------------------------------------------------------
+# The whole dock is ONE line of text, read at three levels:
+#
+#     "Utforskare|Sok/Konsol-Problem"
+#      \_______/ \__/ \____/ \_____/
+#       panel     |     |      panel
+#                 |     stacked under, same column   ("-")
+#                 beside, a new column               ("/")
+#
+# So "|" is tabs behind one another, "-" is a floor below, "/" is a column
+# to the right. Two levels is what every editor actually has, and it is
+# still one line you can read out loud - no tree of splitters, no widget
+# that owns panes. A group with nothing in it is not written down, so it
+# disappears by itself, and so does a column whose floors all emptied.
+
+public define dock_cols(plan: text) -> [text]:
+    edit out = []
+    loop c in split(plan, "/"):
+        if c is not "":
+            out = append(out, c)
+    out
+
+public define dock_floors(col: text) -> [text]:
+    edit out = []
+    loop f in split(col, "-"):
+        if f is not "":
+            out = append(out, f)
+    out
+
+public define dock_names(grp: text) -> [text]:
+    edit out = []
+    loop w in split(grp, "|"):
+        if w is not "":
+            out = append(out, w)
+    out
+
+define joined(acc: text, part: text, mark: text) -> text:
+    if part is "" then acc else if acc is "" then part else "{acc}{mark}{part}"
+
+define minus_name(grp: text, name: text) -> text:
+    edit kept = ""
+    loop w in dock_names(grp):
+        if w is not name:
+            kept = if kept is "" then w else "{kept}|{w}"
+    kept
+
+# One column with the carried panel taken out of every floor in it, and -
+# if this is the column it is landing in - put back where it was dropped.
+define col_after(col: text, name: text, fi: int, where: text, mine: truth) -> text:
+    edit out = ""
+    edit i = 0
+    loop grp in dock_floors(col):
+        left = minus_name(grp, name)
+        hit = mine and i is fi
+        if hit and where is "up":
+            out = joined(out, name, "-")
+        if hit and where is "in":
+            out = joined(out, if left is "" then name else "{left}|{name}", "-")
+        else:
+            out = joined(out, left, "-")
+        if hit and where is "down":
+            out = joined(out, name, "-")
+        i = i + 1
+    out
+
+define holds(plan: text, name: text) -> truth:
+    edit yes = false
+    loop col in dock_cols(plan):
+        loop grp in dock_floors(col):
+            loop w in dock_names(grp):
+                if w is name:
+                    yes = true
+    yes
+
+# Where a carried panel lands: in the group at column `ci` floor `fi`, or
+# on a floor above or below it, or in a new column to either side.
+public define dock_move(plan: text, name: text, ci: int, fi: int, where: text) -> text:
+    edit out = ""
+    edit i = 0
+    loop col in dock_cols(plan):
+        mine = i is ci
+        if mine and where is "left":
+            out = joined(out, name, "/")
+        out = joined(out, col_after(col, name, fi, where, mine), "/")
+        if mine and where is "right":
+            out = joined(out, name, "/")
+        i = i + 1
+    # A panel is never lost. If the place it was aimed at has gone - a
+    # floor that closed while it was in the air - it becomes a column of
+    # its own rather than falling out of the dock altogether.
+    if holds(out, name) then out else joined(out, name, "/")
+
+# Which panel a group is showing: the one most recently asked for that is
+# still in it, else its first. Picks are remembered by NAME, so a group
+# splitting or closing never has to renumber anything.
+define shown_in(g: Gallery, grp: text) -> text:
+    edit best = ""
+    loop w in split(g.dock_pick, "|"):
+        loop have in dock_names(grp):
+            if have is w:
+                best = w
+    if best is not "" then best else if length(dock_names(grp)) is 0 then "" else dock_names(grp)[0]
+
+# A stated width per column, "" for "take what is left". The last column
+# always takes what is left, so the row always fills its room.
+public define width_of(g: Gallery, ci: int, last: truth) -> int:
+    if last:
+        return 0
+    edit i = 0
+    edit found = 0
+    loop w in split(g.dock_ws, "|"):
+        if i is ci:
+            found = number_in(w)
+        i = i + 1
+    if found > 0 then found else 260
+
+# --- the boxes --------------------------------------------------------------
+
+define add_dtab(ns: [Node], g: Gallery, name: text, at_id: text, shown: text) -> [Node]:
+    on = shown is name
+    carried = g.carrying is name
+    # The tab is ONE box: its name is its own text, not a child. A box that
+    # lays out children does not centre its own label, so a tab built as
+    # plate-plus-label drew its name below its plate.
+    append(ns, n(if carried then "ghosted" else "dtab", [p("state", state_of(g, "dock:{at_id}:{name}", on)), p("do", "dock:{at_id}:{name}"), p("text", name), p("radius", "6 6 0 0"), p("h", "28"), p("pad", "11"), p("align", "center"), p("justify", "center")], []))
+
+define add_dtabs(ns: [Node], g: Gallery, at_id: text, shown: text, names: [text], i: int, kids: [int]) -> [Node]:
+    if i >= length(names):
+        return append(ns, n("strip", [p("layout", "flow"), p("gap", "2"), p("pad", "4"), p("fill", "1")], kids))
+    a = add_dtab(ns, g, names[i], at_id, shown)
+    add_dtabs(a, g, at_id, shown, names, i + 1, append(kids, top(a)))
+
+define add_dbody(ns: [Node], g: Gallery, shown: text) -> [Node]:
+    a = add_label(ns, "lead", shown)
+    b = append(a, n("body", [p("text", panel_words(shown)), p("wrap", "1"), p("fill", "1")], []))
+    append(b, n("col", [p("gap", "8"), p("pad", "12"), p("grow", "1"), p("fill", "1")], [top(a), top(b)]))
+
+# The five places a carried panel can land on this group, drawn as washes
+# over it: a wide middle that joins its tabs, a strip down each side that
+# opens a column, and a band top and bottom that opens a floor. You can
+# SEE every one of them before you let go, which is the whole difference
+# between docking that works and docking that guesses.
+define zone(ns: [Node], g: Gallery, at_id: text, where: text, share: text) -> [Node]:
+    name = "drop:{at_id}:{where}"
+    append(ns, n(if g.over is name then "zone:on" else "zone", [p("do", name), p("grow", share), p("fill", "1")], []))
+
+define add_zones(ns: [Node], g: Gallery, at_id: text) -> [Node]:
+    a = zone(ns, g, at_id, "left", "22")
+    b = zone(a, g, at_id, "in", "56")
+    c = zone(b, g, at_id, "right", "22")
+    mid = append(c, n("air", [p("layout", "row"), p("gap", "0"), p("grow", "56"), p("fill", "1")], [top(a), top(b), top(c)]))
+    u = zone(mid, g, at_id, "up", "22")
+    d = zone(u, g, at_id, "down", "22")
+    append(d, n("air", [p("at", "grp:{at_id}"), p("side", "on"), p("layer", "3"), p("layout", "column"), p("gap", "0")], [top(u), top(mid), top(d)]))
+
+define add_group(ns: [Node], g: Gallery, at_id: text, grp: text) -> [Node]:
+    a = add_dtabs(ns, g, at_id, shown_in(g, grp), dock_names(grp), 0, [])
+    b = add_dbody(a, g, shown_in(g, grp))
+    append(b, n("dock", [p("id", "grp:{at_id}"), p("fill", "1"), p("grow", "1"), p("gap", "0"), p("clip", "1")], [top(a), top(b)]))
+
+# The line between two groups. It answers to a name like anything else, so
+# the app knows a drag that began on it is a resize and not a selection.
+define add_grip(ns: [Node], g: Gallery, name: text, across: truth) -> [Node]:
+    tall = [p("state", state_of(g, name, g.grabbed is name)), p("do", name), p("h", "8"), p("fill", "1")]
+    wide = [p("state", state_of(g, name, g.grabbed is name)), p("do", name), p("w", "8"), p("fill", "1")]
+    append(ns, n("grip", if across then tall else wide, []))
+
+# The floors of one column, stacked, with the landing zones over each of
+# them while something is being carried.
+define add_floors(ns: [Node], g: Gallery, ci: int, floors: [text], i: int, kids: [int]) -> [Node]:
+    if i >= length(floors):
+        return append(ns, n("col", [p("gap", "4"), p("grow", "1"), p("fill", "1")], kids))
+    a = add_group(ns, g, "{ci}:{i}", floors[i])
+    with_group = append(kids, top(a))
+    c = if g.carrying is "" then a else add_zones(a, g, "{ci}:{i}")
+    with_zone = if g.carrying is "" then with_group else append(with_group, top(c))
+    add_floors(c, g, ci, floors, i + 1, with_zone)
+
+# The columns, side by side, with a draggable line after all but the last.
+define add_row(ns: [Node], g: Gallery, cols: [text], i: int, kids: [int]) -> [Node]:
+    if i >= length(cols):
+        return append(ns, n("strip", [p("gap", "4"), p("grow", "1"), p("fill", "1")], kids))
+    last = i is length(cols) - 1
+    a = add_floors(ns, g, i, dock_floors(cols[i]), 0, [])
+    wide = width_of(g, i, last)
+    sized = append(a, n("col", if last then [p("grow", "1"), p("fill", "1")] else [p("w", "{wide}"), p("fill", "1")], [top(a)]))
+    with_col = append(kids, top(sized))
+    b = if last then sized else add_grip(sized, g, "grip:x:{i}", false)
+    with_grip = if last then with_col else append(with_col, top(b))
+    add_row(b, g, cols, i + 1, with_grip)
+
+define add_console(ns: [Node], g: Gallery) -> [Node]:
+    a = add_label(ns, "head", "UTDATA")
+    b = append(a, n("body", [p("text", "En rad utskrift. Dra linjen ovanför för att ge den mer eller mindre plats."), p("wrap", "1"), p("fill", "1")], []))
+    append(b, n("dock", [p("h", "{g.dock_h}"), p("pad", "12"), p("gap", "6"), p("fill", "1"), p("clip", "1")], [top(a), top(b)]))
+
+# A status bar. The one in every editor is a row of small readable things
+# with a gap in the middle, and the mistake everybody makes is setting it
+# in type too small to read at a glance - the whole point of it is that
+# you glance.
+define add_stat(ns: [Node], g: Gallery, icon: text, words: text, kind: text) -> [Node]:
+    a = append(ns, n(kind, [p("icon", icon), p("w", "13"), p("h", "13")], []))
+    b = append(a, n("body", [p("text", words)], []))
+    append(b, n("strip", [p("gap", "6"), p("h", "24"), p("pad", "8"), p("align", "center")], [top(a), top(b)]))
+
+define add_status_bar(ns: [Node], g: Gallery) -> [Node]:
+    a = add_stat(ns, g, "folder", "{length(dock_cols(g.dock_plan))} kolumner", "mark:dir")
+    b = add_stat(a, g, "check", "Inga problem", "mark:run")
+    c = append(b, n("air", [p("grow", "1")], []))
+    d = add_stat(c, g, "settings", "{width_of(g, 0, false)} px", "mark:code")
+    e = add_stat(d, g, "bell", "UTF-8", "mark:doc")
+    append(e, n("ontop", [p("h", "28"), p("fill", "1"), p("gap", "4"), p("align", "center")], [top(a), top(b), top(c), top(d), top(e)]))
+
+define page_dock(ns: [Node], g: Gallery) -> [Node]:
+    row = add_row(ns, g, dock_cols(g.dock_plan), 0, [])
+    gy = add_grip(row, g, "grip:y", true)
+    con = add_console(gy, g)
+    hint = add_label(con, "body", if g.carrying is "" then "Dra en flik mitt i en grupp för att gå med, mot en sida för en ny kolumn, mot över- eller underkanten för en ny våning." else "Släpp {g.carrying}: mitten går med, sidorna öppnar en kolumn, över och under en våning.")
+    bar = add_status_bar(hint, g)
+    append(bar, n("col", [p("gap", "4"), p("grow", "1"), p("fill", "1")], [top(row), top(gy), top(con), top(hint), top(bar)]))
+
+
+# --- what a press does ------------------------------------------------------
+#
+# One place says how the gallery changes when something is pressed, so the
+# native app and the browser cannot drift apart. They had: the app answered
+# thirty-three names and the server answered two, which is why folding a
+# section, opening the drawer and half the screen did nothing in a browser
+# while working perfectly in the window.
+#
+# Everything here is a pure change of state - a name in, a Gallery out. What
+# is NOT here is what needs a platform or a pointer: taking hold of a slider,
+# where a menu should open, where a caret lands, and rebuilding the theme
+# after the palette is switched. Those stay with whoever has a window.
+public define pressed(g: Gallery, name: text) -> Gallery:
+    edit lit = g.lit
+    edit open_set = g.open
+    edit drawer = g.drawer
+    edit zoom = g.zoom
+    edit tab = g.tab
+    edit page = g.page
+    edit table_at = g.table_at
+    edit sort_by = g.sort_by
+    edit sort_up = g.sort_up
+    edit chosen = g.chosen
+    edit boxes = g.boxes
+    edit notes = g.notes
+    edit bright = g.bright
+    edit contrast = g.contrast
+    edit vsync = g.vsync
+    edit subs = g.subs
+    edit quality = g.quality
+    edit steps = g.steps
+    edit card = g.card
+    edit slot = g.slot
+    edit bind = g.bind
+    edit dock_pick = g.dock_pick
+    edit dialog = g.dialog
+    edit menu = g.menu
+    edit picked_item = g.picked_item
+    edit screen_at = g.screen
+
+    if name is "dialog":
+        dialog = true
+    # Anything inside a dialog closes it; the scrim is the "no" you get for
+    # clicking beside it.
+    if name is "cancel" or name is "confirm" or name is "scrim":
+        dialog = false
+    if name is "open_menu":
+        menu = "open_menu"
+    # Anything inside the menu closes it; a name says which was chosen.
+    if starts_with(name, "menu:"):
+        chose = after_at(name, 5)
+        if g.menu is "screen":
+            screen_at = chose
+        else:
+            picked_item = chose
+        menu = ""
+    if name is "close_menu":
+        menu = ""
+    if name is "screen":
+        menu = "screen"
+    if name is "switch":
+        lit = not lit
+    # A tree branch and a folding section are the same gesture: a name goes
+    # in or out of the open set, and the document asks the set how tall the
+    # box should be. The set holds the BRANCH name, not the row that was
+    # clicked - the tree asks "is veil open", and the row is twig:veil.
+    if starts_with(name, "twig:"):
+        open_set = toggled(open_set, after_at(name, 5))
+    if starts_with(name, "fold"):
+        open_set = toggled(open_set, name)
+    if name is "drawer":
+        drawer = not drawer
+    if starts_with(name, "zoom"):
+        zoom = number_in(after_at(name, 4))
+        put = set_scale(zoom)
+    # Which page, worked out from the SAME list the tab bar is built from.
+    # A new page starts at its top: changing what a box holds is not
+    # scrolling it.
+    if starts_with(name, "tab:"):
+        loop w in tab_names():
+            if name is "tab:{w}":
+                tab = w
+        page = 0
+        table_at = 0
+    if starts_with(name, "sort:"):
+        want_by = after_at(name, 5)
+        sort_up = if want_by is g.sort_by then not g.sort_up else true
+        sort_by = want_by
+    if starts_with(name, "trow"):
+        chosen = number_in(after_at(name, 4))
+    if starts_with(name, "row"):
+        chosen = number_in(after_at(name, 3))
+    if name is "boxes":
+        boxes = not boxes
+    if name is "toast":
+        notes = if g.notes is "" then "Något hände" else "{g.notes}|Något hände igen"
+    if name is "bright":
+        bright = not bright
+        day = set_bright(bright)
+    if name is "contrast":
+        contrast = not contrast
+        lit_up = set_contrast(contrast)
+    if name is "chk:vsync":
+        vsync = not vsync
+    if name is "chk:subs":
+        subs = not subs
+    if starts_with(name, "rad:"):
+        quality = after_at(name, 4)
+    if name is "step:up" and g.steps < 99:
+        steps = g.steps + 1
+    if name is "step:down" and g.steps > 0:
+        steps = g.steps - 1
+    if name is "card:prev" and g.card > 0:
+        card = g.card - 1
+    if name is "card:next" and g.card < card_count() - 1:
+        card = g.card + 1
+    if starts_with(name, "slot"):
+        slot = number_in(after_at(name, 4))
+    if starts_with(name, "bind:"):
+        bind = name
+    # A dock tab shows its panel whether or not it is then dragged, and it
+    # is what a drag would be carrying. Any other press is not carrying
+    # anything, which is how letting go somewhere useless ends a drag.
+    edit carrying = ""
+    if starts_with(name, "dock:"):
+        carried = last_bit(name)
+        carrying = carried
+        dock_pick = "{without_in(g.dock_pick, carried)}{if without_in(g.dock_pick, carried) is "" then "" else "|"}{carried}"
+
+    Gallery{win_w: g.win_w, win_h: g.win_h, seconds: g.seconds, hover: g.hover, focus: g.focus, show_focus: g.show_focus, tab: tab, scroll: g.scroll, chosen: chosen, before: g.before, picked: g.picked, after: g.after, typing: name is "field", dialog: dialog, lit: lit, menu: menu, menu_x: g.menu_x, menu_y: g.menu_y, picked_item: picked_item, open: open_set, drawer: drawer, zoom: zoom, page: page, dock_w: g.dock_w, dock_h: g.dock_h, dock_plan: g.dock_plan, dock_pick: dock_pick, dock_ws: g.dock_ws, carrying: carrying, carry_x: g.carry_x, carry_y: g.carry_y, over: g.over, grabbed: g.grabbed, moved: g.moved, sort_by: sort_by, sort_up: sort_up, table_at: table_at, contrast: contrast, bright: bright, tip: g.tip, notes: notes, boxes: boxes, note: g.note, note_at: g.note_at, note_to: g.note_to, noting: name is "note", slider: g.slider, volume: g.volume, sfx: g.sfx, vsync: vsync, subs: subs, quality: quality, steps: steps, screen: screen_at, card: card, slot: slot, bind: bind, key_fwd: g.key_fwd, key_jump: g.key_jump}
+
+# What a carried thing MEANS when it is let go over something.
+#
+# A dock tab dropped on a landing joins that group, or opens a new one:
+#   "drop:2:pre"      group two, along its leading edge
+#   "drop:2:1:up"     column two, floor one, along its top edge
+# The middle of a landing joins the group it names; an edge opens a column,
+# and top or bottom opens a floor. A row let go on a tree branch moves into
+# it instead.
+#
+# Same reason `pressed` is here: a window and a browser must not be able to
+# answer this differently.
+public define dropped(g: Gallery, over: text) -> Gallery:
+    edit plan = g.dock_plan
+    edit pick = g.dock_pick
+    edit shifted = g.moved
+    if starts_with(over, "drop:") and g.carrying is not "":
+        said = split(over, ":")
+        plan = dock_move(g.dock_plan, g.carrying, number_in(said[1]), number_in(said[2]), said[3])
+        pick = "{without_in(g.dock_pick, g.carrying)}{if without_in(g.dock_pick, g.carrying) is "" then "" else "|"}{g.carrying}"
+    if starts_with(over, "twig:") and g.carrying is not "" and after_at(over, 5) is not g.carrying:
+        shifted = "{without_pair(g.moved, g.carrying)}{if without_pair(g.moved, g.carrying) is "" then "" else "|"}{g.carrying}>{after_at(over, 5)}"
+    Gallery{win_w: g.win_w, win_h: g.win_h, seconds: g.seconds, hover: g.hover, focus: g.focus, show_focus: g.show_focus, tab: g.tab, scroll: g.scroll, chosen: g.chosen, before: g.before, picked: g.picked, after: g.after, typing: g.typing, dialog: g.dialog, lit: g.lit, menu: g.menu, menu_x: g.menu_x, menu_y: g.menu_y, picked_item: g.picked_item, open: g.open, drawer: g.drawer, zoom: g.zoom, page: g.page, dock_w: g.dock_w, dock_h: g.dock_h, dock_plan: plan, dock_pick: pick, dock_ws: g.dock_ws, carrying: "", carry_x: g.carry_x, carry_y: g.carry_y, over: "", grabbed: g.grabbed, moved: shifted, sort_by: g.sort_by, sort_up: g.sort_up, table_at: g.table_at, contrast: g.contrast, bright: g.bright, tip: g.tip, notes: g.notes, boxes: g.boxes, note: g.note, note_at: g.note_at, note_to: g.note_to, noting: g.noting, slider: g.slider, volume: g.volume, sfx: g.sfx, vsync: g.vsync, subs: g.subs, quality: g.quality, steps: g.steps, screen: g.screen, card: g.card, slot: g.slot, bind: g.bind, key_fwd: g.key_fwd, key_jump: g.key_jump}
+
+# Where a carried thing is, and what it is over. Pure state; who works out
+# the pointer position is whoever has one.
+public define carried_to(g: Gallery, at_x: int, at_y: int, over: text) -> Gallery:
+    Gallery{win_w: g.win_w, win_h: g.win_h, seconds: g.seconds, hover: g.hover, focus: g.focus, show_focus: g.show_focus, tab: g.tab, scroll: g.scroll, chosen: g.chosen, before: g.before, picked: g.picked, after: g.after, typing: g.typing, dialog: g.dialog, lit: g.lit, menu: g.menu, menu_x: g.menu_x, menu_y: g.menu_y, picked_item: g.picked_item, open: g.open, drawer: g.drawer, zoom: g.zoom, page: g.page, dock_w: g.dock_w, dock_h: g.dock_h, dock_plan: g.dock_plan, dock_pick: g.dock_pick, dock_ws: g.dock_ws, carrying: g.carrying, carry_x: at_x, carry_y: at_y, over: over, grabbed: g.grabbed, moved: g.moved, sort_by: g.sort_by, sort_up: g.sort_up, table_at: g.table_at, contrast: g.contrast, bright: g.bright, tip: g.tip, notes: g.notes, boxes: g.boxes, note: g.note, note_at: g.note_at, note_to: g.note_to, noting: g.noting, slider: g.slider, volume: g.volume, sfx: g.sfx, vsync: g.vsync, subs: g.subs, quality: g.quality, steps: g.steps, screen: g.screen, card: g.card, slot: g.slot, bind: g.bind, key_fwd: g.key_fwd, key_jump: g.key_jump}
+
+# The pairs with this name taken out, so a row can only live in one place.
+define without_pair(pairs: text, name: text) -> text:
+    edit out = ""
+    loop pair in split(pairs, "|"):
+        parts = split(pair, ">")
+        if pair is not "" and (length(parts) < 2 or parts[0] is not name):
+            out = if out is "" then pair else "{out}|{pair}"
+    out
+
+# The three small readings a press needs. They live here rather than in
+# whoever calls it, because the names they read are the gallery's own.
+define after_at(whole: text, from: number) -> text:
+    b = bytes_of(whole)
+    n = bytes_count(b)
+    cut = if from > n then n else from
+    text_of(bytes_part(b, cut, n))
+
+define last_bit(whole: text) -> text:
+    parts = split(whole, ":")
+    if length(parts) is 0 then whole else parts[length(parts) - 1]
+
+# A name goes in or out of a set held as one text with bars between the
+# names - which is how a tree remembers which branches are open and a
+# folding section remembers whether it is.
+define toggled(now: text, name: text) -> text:
+    edit out = ""
+    edit found = false
+    loop w in split(now, "|"):
+        if w is name:
+            found = true
+        else if w is not "":
+            out = if out is "" then w else "{out}|{w}"
+    if found then out else if out is "" then name else "{out}|{name}"
+
+define without_in(set_of: text, one: text) -> text:
+    edit kept = ""
+    loop w in split(set_of, "|"):
+        if w is not one and w is not "":
+            kept = if kept is "" then w else "{kept}|{w}"
+    kept
+
+# What a DRAG does, once whoever has the pointer has worked out where it
+# is. The geometry stays with them - which control is held, how far the
+# pointer has come since it took hold, and how far along that control's own
+# box it now sits. What that MEANS is the same in a window and in a page.
+#
+#   share  0..100 along the held control, for the things that are a share
+#   dx dy  how far the pointer has moved since it took hold
+#   grab_w what the thing was when it was taken hold of
+# A control with a VALUE takes the arrows itself: left and right nudge it
+# and the focus ring stays where it is. Without this a slider could be
+# reached by keyboard and then not used by one, which is worse than not
+# being reachable - the ring stops on it and nothing you press does
+# anything.
+public define takes_arrows(name: text) -> truth:
+    name is "slider" or name is "vol" or name is "sfx"
+
+# A step is five per cent. Small enough to land where you meant, big enough
+# that crossing the track does not take a hundred presses.
+public define nudged(g: Gallery, name: text, by: int) -> Gallery:
+    now = if name is "slider" then g.slider else if name is "vol" then g.volume else g.sfx
+    want = now + by
+    at = if want < 0 then 0 else if want > 100 then 100 else want
+    dragged(g, name, at, 0, 0, 0)
+
+public define dragged(g: Gallery, held: text, share: int, dx: int, dy: int, grab_w: int) -> Gallery:
+    edit slider = g.slider
+    edit volume = g.volume
+    edit sfx = g.sfx
+    edit dock_ws = g.dock_ws
+    edit dock_h = g.dock_h
+    if held is "slider":
+        slider = share
+    if held is "vol":
+        volume = share
+    if held is "sfx":
+        sfx = share
+    if starts_with(held, "grip:x:"):
+        want = grab_w + dx
+        wide = if want < 120 then 120 else if want > g.win_w - 300 then g.win_w - 300 else want
+        dock_ws = set_width(g.dock_ws, number_in(after_at(held, 7)), wide)
+    if held is "grip:y":
+        want = grab_w - dy
+        dock_h = if want < 60 then 60 else if want > g.win_h - 300 then g.win_h - 300 else want
+    Gallery{win_w: g.win_w, win_h: g.win_h, seconds: g.seconds, hover: g.hover, focus: g.focus, show_focus: g.show_focus, tab: g.tab, scroll: g.scroll, chosen: g.chosen, before: g.before, picked: g.picked, after: g.after, typing: g.typing, dialog: g.dialog, lit: g.lit, menu: g.menu, menu_x: g.menu_x, menu_y: g.menu_y, picked_item: g.picked_item, open: g.open, drawer: g.drawer, zoom: g.zoom, page: g.page, dock_w: g.dock_w, dock_h: dock_h, dock_plan: g.dock_plan, dock_pick: g.dock_pick, dock_ws: dock_ws, carrying: g.carrying, carry_x: g.carry_x, carry_y: g.carry_y, over: g.over, grabbed: g.grabbed, moved: g.moved, sort_by: g.sort_by, sort_up: g.sort_up, table_at: g.table_at, contrast: g.contrast, bright: g.bright, tip: g.tip, notes: g.notes, boxes: g.boxes, note: g.note, note_at: g.note_at, note_to: g.note_to, noting: g.noting, slider: slider, volume: volume, sfx: sfx, vsync: g.vsync, subs: g.subs, quality: g.quality, steps: g.steps, screen: g.screen, card: g.card, slot: g.slot, bind: g.bind, key_fwd: g.key_fwd, key_jump: g.key_jump}
+
+# How far along a box a pointer sits, in hundredths. What a slider IS.
+public define share_at(r: Rect, x: int) -> int:
+    wide = to_whole(r.wide)
+    if wide <= 0:
+        return 0
+    part = (x - to_whole(r.x)) * 100 // wide
+    if part < 0 then 0 else if part > 100 then 100 else part
+
+# The width of one dock column, written into the same "|" line the others
+# use.
+public define set_width(widths: text, ci: int, wide: int) -> text:
+    edit out = ""
+    edit i = 0
+    loop w in split(widths, "|"):
+        out = if out is "" then (if i is ci then "{wide}" else w) else "{out}|{if i is ci then "{wide}" else w}"
+        i = i + 1
+    edit seen = i
+    loop:
+        if seen > ci:
+            break
+        out = if out is "" then (if seen is ci then "{wide}" else "260") else "{out}|{if seen is ci then "{wide}" else "260"}"
+        seen = seen + 1
+    out
+
+# --- the tokens themselves -------------------------------------------------
+# A theme is a table of named values, so the honest way to show one is the
+# table. Nothing here is a new kind of box: a swatch is an empty node with
+# a colour, which is what a swatch IS.
+
+define add_token_row(ns: [Node], g: Gallery, name: text) -> [Node]:
+    a = append(ns, n("chip", [p("color", token_value(name)), p("w", "34"), p("h", "22"), p("radius", "5")], []))
+    b = append(a, n("body", [p("text", name), p("grow", "1")], []))
+    c = append(b, n("head", [p("text", token_value(name))], []))
+    append(c, n("strip", [p("gap", "10"), p("h", "26"), p("fill", "1"), p("align", "center")], [top(a), top(b), top(c)]))
+
+define add_tokens(ns: [Node], g: Gallery, names: [text], i: int, kids: [int]) -> [Node]:
+    if i >= length(names):
+        return append(ns, n("col", [p("gap", "2"), p("fill", "1")], kids))
+    a = add_token_row(ns, g, names[i])
+    add_tokens(a, g, names, i + 1, append(kids, top(a)))
+
+define add_token_sheet(ns: [Node], g: Gallery) -> [Node]:
+    a = add_section(ns, "FÄRGTOKEN")
+    b = add_tokens(a, g, token_names(), 0, [])
+    c = append(b, n("body", [p("text", "Varje färg i temat är ett av de här namnen. [#e0b04a]Ljust läge[] byter bara värdena bakom dem - ingen roll ändras."), p("wrap", "1"), p("fill", "1")], []))
+    append(c, n("panel", [p("fill", "1")], [top(a), top(b), top(c)]))
+
+# The other two tables a theme has: how big text is, and how round and how
+# far apart things are. Both are read straight off the roles, so what you
+# see here is what everything else is built from.
+define add_step(ns: [Node], g: Gallery, kind: text, words: text, note: text) -> [Node]:
+    a = append(ns, n(kind, [p("text", words), p("grow", "1")], []))
+    b = append(a, n("head", [p("text", note)], []))
+    append(b, n("strip", [p("gap", "10"), p("fill", "1"), p("align", "center")], [top(a), top(b)]))
+
+define add_type_sheet(ns: [Node], g: Gallery) -> [Node]:
+    a = add_section(ns, "TEXTSTORLEKAR")
+    b = add_step(a, g, "huge", "Sfinx 34", "huge")
+    c = add_step(b, g, "title", "Sfinx vakar 22", "title")
+    d = add_step(c, g, "lead", "Sfinx vakar över 14", "lead")
+    e = add_step(d, g, "body", "Sfinx vakar över den 13", "body")
+    f = add_step(e, g, "head", "SFINX VAKAR ÖVER DEN 11", "head")
+    append(f, n("panel", [p("fill", "1")], [top(a), top(b), top(c), top(d), top(e), top(f)]))
+
+define add_radius(ns: [Node], g: Gallery, r: int) -> [Node]:
+    a = append(ns, n("chip", [p("color", accent()), p("w", "40"), p("h", "40"), p("radius", "{r}")], []))
+    b = append(a, n("head", [p("text", "{r}")], []))
+    append(b, n("col", [p("gap", "5"), p("align", "center")], [top(a), top(b)]))
+
+define add_shape_sheet(ns: [Node], g: Gallery) -> [Node]:
+    a = add_section(ns, "HÖRN OCH MELLANRUM")
+    b = add_radius(a, g, 0)
+    c = add_radius(b, g, 4)
+    d = add_radius(c, g, 8)
+    e = add_radius(d, g, 14)
+    f = add_radius(e, g, 20)
+    h = append(f, n("strip", [p("layout", "flow"), p("gap", "12"), p("fill", "1")], [top(b), top(c), top(d), top(e), top(f)]))
+    append(h, n("panel", [p("fill", "1")], [top(a), top(h)]))
+
+# --- built out of the base -------------------------------------------------
+# Everything below is a thing other frameworks ship as its own component.
+# None of them is one here: each is a handful of the SAME boxes arranged,
+# which is the whole argument for keeping the base small. If you can read
+# these twenty lines you can build the next one yourself.
+
+define add_avatar(ns: [Node], g: Gallery, letter: text, colour: text) -> [Node]:
+    append(ns, n("chip", [p("color", colour), p("text", letter), p("w", "32"), p("h", "32"), p("radius", "999"), p("clip", "1"), p("align", "center"), p("justify", "center")], []))
+
+# A breadcrumb: labels and separators in a row.
+define add_crumb(ns: [Node], g: Gallery) -> [Node]:
+    a = add_label(ns, "body", "Hem")
+    b = add_label(a, "ink_ghost_label", "/")
+    c = add_label(b, "body", "Projekt")
+    d = add_label(c, "ink_ghost_label", "/")
+    e = add_label(d, "lead", "Veil")
+    append(e, n("strip", [p("gap", "8"), p("fill", "1"), p("align", "center")], [top(a), top(b), top(c), top(d), top(e)]))
+
+# A badge on a button: a chip floated to the button's own corner.
+define add_badged(ns: [Node], g: Gallery) -> [Node]:
+    a = append(ns, n("btn", [p("id", "inbox"), p("do", "inbox"), p("state", state_of(g, "inbox", false)), p("text", "Inkorg"), p("w", "120"), p("h", "32"), p("align", "center"), p("justify", "center")], []))
+    b = append(a, n("chipbad", [p("at", "inbox"), p("side", "corner"), p("text", "9"), p("w", "20"), p("h", "20"), p("radius", "999"), p("layer", "2"), p("pass", "1"), p("align", "center"), p("justify", "center")], []))
+    append(b, n("air", [p("w", "130"), p("h", "36")], [top(a), top(b)]))
+
+# A person: a round picture, two lines and a mark. Every list of people in
+# every program is this row.
+define add_person(ns: [Node], g: Gallery, letter: text, name: text, said: text, colour: text) -> [Node]:
+    a = add_avatar(ns, g, letter, colour)
+    b = add_label(a, "lead", name)
+    c = add_label(b, "head", said)
+    d = append(c, n("col", [p("gap", "1"), p("grow", "1")], [top(b), top(c)]))
+    e = append(d, n("chipgood", [p("text", "På"), p("h", "20"), p("pad", "8"), p("radius", "999"), p("align", "center"), p("justify", "center")], []))
+    append(e, n("strip", [p("gap", "10"), p("fill", "1"), p("align", "center")], [top(a), top(d), top(e)]))
+
+# A stat: a big number over a small word, three across.
+define add_stat_card(ns: [Node], g: Gallery, big_num: text, words: text) -> [Node]:
+    a = add_label(ns, "title", big_num)
+    b = add_label(a, "head", words)
+    append(b, n("sunk_card", [p("gap", "2"), p("pad", "12"), p("grow", "1"), p("fill", "1")], [top(a), top(b)]))
+
+define add_built(ns: [Node], g: Gallery) -> [Node]:
+    a = add_section(ns, "BYGGT AV BASEN")
+    b = add_crumb(a, g)
+    c = add_person(b, g, "J", "Johan", "skrev för en stund sedan", accent())
+    d = add_person(c, g, "V", "Veil", "ritade om skärmen", good())
+    e = add_badged(d, g)
+    f = add_stat_card(e, g, "185", "PROV SOM HÅLLER")
+    h = add_stat_card(f, g, "3", "MS PER BILD")
+    i = add_stat_card(h, g, "1 MB", "PER BILD")
+    j = append(i, n("strip", [p("gap", "8"), p("fill", "1")], [top(f), top(h), top(i)]))
+    k = append(j, n("body", [p("text", "Ingen av de här är en komponent. Brödsmulor är en rad etiketter, en person är en rund ruta och tre texter, en bricka är en chip som ligger [#e0b04a]side: corner[] på sin knapp."), p("wrap", "1"), p("fill", "1")], []))
+    append(k, n("panel", [p("fill", "1")], [top(a), top(b), top(c), top(d), top(e), top(j), top(k)]))
+
+define page_theme(ns: [Node], g: Gallery) -> [Node]:
+    a = add_token_sheet(ns, g)
+    b = add_type_sheet(a, g)
+    lft = append(b, n("col", [p("gap", "14"), p("w", "330"), p("fill", "1")], [top(a), top(b)]))
+    c = add_built(lft, g)
+    d = add_shape_sheet(c, g)
+    rgt = append(d, n("col", [p("gap", "14"), p("grow", "1"), p("fill", "1")], [top(c), top(d)]))
+    append(rgt, n("strip", [p("gap", "14"), p("grow", "1"), p("fill", "1")], [top(lft), top(rgt)]))
+
+# --- page five: a game's menus --------------------------------------------
+
+public define quality_names() -> [text] = ["Låg", "Mellan", "Hög"]
+
+public define screen_names() -> [text] = ["1280 x 720", "1920 x 1080", "2560 x 1440", "3840 x 2160"]
+
+define add_binding(ns: [Node], g: Gallery, words: text, name: text, bound: text) -> [Node]:
+    waiting = g.bind is name
+    shown = if waiting then "Tryck..." else bound
+    b = append(ns, n("key", [p("state", if waiting then "on" else ""), p("do", name), p("text", shown), p("w", "92"), p("h", "26"), p("align", "center"), p("justify", "center")], []))
+    add_setting(b, words, top(b))
+
+define add_settings(ns: [Node], g: Gallery) -> [Node]:
+    a = add_section(ns, "INSTÄLLNINGAR")
+    scr = if g.screen is "" then screen_names()[1] else g.screen
+    b = add_dropdown(a, g, "screen", scr)
+    c = add_setting(b, "Upplösning", top(b))
+    d = add_radios(c, g, quality_names(), 0, [])
+    e = add_setting(d, "Kvalitet", top(d))
+    f = add_check(e, g, "", "chk:vsync", g.vsync)
+    h = add_setting(f, "Vsync", top(f))
+    i = add_slider(h, g, "vol", g.volume, "mana")
+    j = add_setting(i, "Musik", top(i))
+    k = add_slider(j, g, "sfx", g.sfx, "mana")
+    l = add_setting(k, "Effekter", top(k))
+    m = append(l, n("hair", [p("h", "1"), p("fill", "1")], []))
+    o = add_binding(m, g, "Framåt", "bind:fwd", g.key_fwd)
+    q = add_binding(o, g, "Hoppa", "bind:jump", g.key_jump)
+    append(q, n("panel", [p("fill", "1")], [top(a), top(c), top(e), top(h), top(j), top(l), top(m), top(o), top(q)]))
+
+define add_status(ns: [Node], g: Gallery) -> [Node]:
+    a = add_section(ns, "STATUS")
+    hp = 30 + to_whole(g.seconds * 9.0) % 70
+    a2 = add_named_bar(a, "LIV", "hp", hp)
+    b = add_named_bar(a2, "MANA", "mana", 62)
+    c = add_named_bar(b, "ERFARENHET", "xp", 41)
+    append(c, n("panel", [p("fill", "1")], [top(a), top(a2), top(b), top(c)]))
+
+define slot_icons() -> [text]:
+    ["star", "heart", "lock", "bell", "folder", "file", "settings", "search", "diamond", "circle", "triangle", "play"]
+
+define add_slots(ns: [Node], g: Gallery, names: [text], i: int, kids: [int]) -> [Node]:
+    if i >= length(names):
+        return append(ns, n("col", [p("layout", "grid"), p("cols", "6"), p("gap", "8"), p("fill", "1")], kids))
+    name = "slot{i}"
+    a = append(ns, n("air", [p("icon", names[i]), p("w", "20"), p("h", "20")], []))
+    b = append(a, n("cell", [p("state", state_of(g, name, g.slot is i)), p("do", name), p("h", "46"), p("fill", "1"), p("align", "center"), p("justify", "center")], [top(a)]))
+    add_slots(b, g, names, i + 1, append(kids, top(b)))
+
+define add_inventory(ns: [Node], g: Gallery) -> [Node]:
+    a = add_section(ns, "VÄSKA")
+    b = add_slots(a, g, slot_icons(), 0, [])
+    append(b, n("panel", [p("fill", "1")], [top(a), top(b)]))
+
+# A carousel is a row wider than its box, clipped, with the offset saying
+# which card is showing. The arrows move the offset; nothing else changes.
+define card_words(i: int) -> text:
+    if i is 0 then "En rad som beskriver kortet" else if i is 1 then "Nästa kort i samma remsa" else if i is 2 then "Tredje kortet, samma bredd" else "Sista kortet i remsan"
+
+define card_skin(i: int) -> text:
+    if i is 0 then "sky" else if i is 1 then "fire" else if i is 2 then "deep" else "dusk"
+
+public define card_count() -> int = 4
+
+define add_cards(ns: [Node], g: Gallery, i: int, kids: [int]) -> [Node]:
+    if i >= card_count():
+        return append(ns, n("strip", [p("gap", "12")], kids))
+    a = append(ns, n(card_skin(i), [p("h", "54"), p("fill", "1")], []))
+    b = add_label(a, "lead", "Kort {i + 1}")
+    c = add_label(b, "tiny", card_words(i))
+    d = append(c, n("deck", [p("w", "190"), p("h", "150")], [top(a), top(b), top(c)]))
+    add_cards(d, g, i + 1, append(kids, top(d)))
+
+define add_carousel(ns: [Node], g: Gallery) -> [Node]:
+    a = add_section(ns, "KARUSELL")
+    b = add_cards(a, g, 0, [])
+    c = append(b, n("air", [p("h", "160"), p("fill", "1"), p("clip", "1"), p("scroll_x", "{g.card * 202}")], [top(b)]))
+    d = add_icon_button(c, g, "chevron_left", "card:prev")
+    e = add_label(d, "body", "{g.card + 1} / {card_count()}")
+    f = append(e, n("air", [p("grow", "1")], []))
+    h = add_icon_button(f, g, "chevron_right", "card:next")
+    i = append(h, n("strip", [p("gap", "8"), p("fill", "1"), p("align", "center")], [top(d), top(e), top(f), top(h)]))
+    append(i, n("panel", [p("fill", "1")], [top(a), top(c), top(i)]))
+
+# A frame skinned from a picture, with text that can be read on top of
+# whatever is behind it. The two things every game UI is made of and no
+# app UI ever needs.
+define add_skin(ns: [Node], g: Gallery) -> [Node]:
+    a = add_section(ns, "SKINNAD PANEL")
+    b = append(a, n("carved", [p("text", "Ramen är en bild"), p("ink_edge", "#000000cc"), p("size", "16")], []))
+    c = append(b, n("carved", [p("text", "Hörnen behåller sin storlek hur stor rutan än blir. Konturen gör texten läsbar mot vad som helst."), p("ink_edge", "#000000cc"), p("wrap", "1"), p("fill", "1")], []))
+    d = append(c, n("air", [p("nine", "assets/panel9.png"), p("slice", "14"), p("pad", "18"), p("gap", "8"), p("h", "130"), p("fill", "1")], [top(b), top(c)]))
+    append(d, n("panel", [p("fill", "1")], [top(a), top(d)]))
+
+define page_game(ns: [Node], g: Gallery) -> [Node]:
+    a = add_settings(ns, g)
+    lft = append(a, n("col", [p("gap", "14"), p("w", "380"), p("fill", "1")], [top(a)]))
+    b = add_status(lft, g)
+    c = add_inventory(b, g)
+    sk = add_skin(c, g)
+    d = add_carousel(sk, g)
+    rgt = append(d, n("col", [p("gap", "14"), p("grow", "1"), p("fill", "1")], [top(b), top(c), top(sk), top(d)]))
+    append(rgt, n("strip", [p("gap", "14"), p("grow", "1"), p("fill", "1")], [top(lft), top(rgt)]))
+
+# --- page six: the surface ------------------------------------------------
+
+define add_swatch(ns: [Node], kind: text, words: text) -> [Node]:
+    a = append(ns, n(kind, [p("h", "54"), p("fill", "1")], []))
+    b = add_label(a, "tiny", words)
+    append(b, n("col", [p("gap", "5"), p("fill", "1")], [top(a), top(b)]))
+
+define add_gradients(ns: [Node], g: Gallery) -> [Node]:
+    a = add_section(ns, "TONADE FYLLNINGAR")
+    b = add_swatch(a, "sky", "grad:2b5ea8:0d1626")
+    c = add_swatch(b, "fire", "grad:e8a33c:8a1d2e")
+    d = add_swatch(c, "deep", "grad:3ec98a:0d2b1e")
+    e = add_swatch(d, "dusk", "grad:7d4fc8:1a1030")
+    f = append(e, n("col", [p("layout", "grid"), p("cols", "2"), p("gap", "12"), p("fill", "1")], [top(b), top(c), top(d), top(e)]))
+    h = add_label(f, "body", "Renderaren blandar per rad, så tonen är jämn och inte trappstegad.")
+    append(h, n("panel", [p("fill", "1")], [top(a), top(f), top(h)]))
+
+define add_depth(ns: [Node], g: Gallery) -> [Node]:
+    a = add_section(ns, "KANT, HÖRN OCH SKUGGA")
+    b = add_swatch(a, "soft", "radius: 4")
+    c = add_swatch(b, "round", "radius: 14")
+    d = add_swatch(c, "edged", "border: 2")
+    e = add_swatch(d, "raised", "shadow: 20")
+    f = append(e, n("col", [p("layout", "grid"), p("cols", "4"), p("gap", "12"), p("fill", "1")], [top(b), top(c), top(d), top(e)]))
+    append(f, n("panel", [p("fill", "1")], [top(a), top(f)]))
+
+# A mask is not a component and not a property: it is the CLIP the parent
+# already has, with a corner big enough to be the shape you want. A radius
+# past half the shorter side is a circle, so an avatar is a picture in a
+# box that clips - which is exactly how Unreal says it too.
+define add_masks(ns: [Node], g: Gallery) -> [Node]:
+    a = add_section(ns, "MASK ÄR FÖRÄLDERNS KLIPP")
+    b = append(a, n("blk", [p("fill", "1"), p("grow", "1")], []))
+    c = append(b, n("air", [p("clip", "1"), p("radius", "999"), p("w", "72"), p("h", "72")], [top(b)]))
+    d = append(c, n("blk2", [p("fill", "1"), p("grow", "1")], []))
+    e = append(d, n("air", [p("clip", "1"), p("radius", "18"), p("w", "72"), p("h", "72")], [top(d)]))
+    f = append(e, n("blk3", [p("fill", "1"), p("grow", "1")], []))
+    h = append(f, n("air", [p("clip", "1"), p("radius", "4"), p("w", "72"), p("h", "72")], [top(f)]))
+    i = append(h, n("strip", [p("gap", "14"), p("fill", "1")], [top(c), top(e), top(h)]))
+    j = append(i, n("body", [p("text", "clip: 1 plus [#e0b04a]radius[] pa foraldern maskar barnen. En radie storre an halva sidan ar en cirkel. Klippet bar en radie, inte fyra."), p("wrap", "1"), p("fill", "1")], []))
+    append(j, n("panel", [p("fill", "1")], [top(a), top(i), top(j)]))
+
+define add_typescale(ns: [Node], g: Gallery) -> [Node]:
+    a = add_section(ns, "TYPOGRAFI")
+    b = add_label(a, "huge", "Sfinx vakar 34")
+    c = add_label(b, "title", "Sfinx vakar över den 22")
+    d = add_label(c, "lead", "Sfinx vakar över den bevärade 14")
+    e = add_label(d, "body", "Sfinx vakar över den bevärade gumman 13")
+    f = add_label(e, "tiny", "SFINX VAKAR ÖVER DEN BEVÄRADE GUMMAN 10")
+    append(f, n("panel", [p("fill", "1")], [top(a), top(b), top(c), top(d), top(e), top(f)]))
+
+define page_surface(ns: [Node], g: Gallery) -> [Node]:
+    a = add_gradients(ns, g)
+    b = add_depth(a, g)
+    lft = append(b, n("col", [p("gap", "14"), p("grow", "1"), p("fill", "1")], [top(a), top(b)]))
+    mk = add_masks(lft, g)
+    c = add_typescale(mk, g)
+    d = add_icon_row(c, g)
+    rgt = append(d, n("col", [p("gap", "14"), p("w", "340"), p("fill", "1")], [top(mk), top(c), top(d)]))
+    append(rgt, n("strip", [p("gap", "14"), p("grow", "1"), p("fill", "1")], [top(lft), top(rgt)]))
+
+define add_page(ns: [Node], g: Gallery) -> [Node]:
+    if g.tab is "layout":
+        return page_layout(ns, g)
+    if g.tab is "innehall":
+        return page_content(ns, g)
+    if g.tab is "docka":
+        return page_dock(ns, g)
+    if g.tab is "spel":
+        return page_game(ns, g)
+    if g.tab is "yta":
+        return page_surface(ns, g)
+    if g.tab is "tema":
+        return page_theme(ns, g)
+    page_controls(ns, g)
+
+# --- menus -----------------------------------------------------------------
+# A dropdown and a right-click menu are the same thing in two places: rows
+# on a raised sheet, with an invisible sheet behind them that takes the
+# click that closes it.
+
+public define menu_items() -> [text]:
+    ["Kopiera", "Klistra in", "Ta bort", "Byt namn"]
+
+# Which list a menu shows depends only on who opened it.
+define items_for(g: Gallery) -> [text]:
+    if g.menu is "screen" then screen_names() else menu_items()
+
+define add_items(ns: [Node], g: Gallery, items: [text], i: int, wide: text, kids: [int]) -> [Node]:
+    if i >= length(items):
+        return append(ns, n("menu", [p("w", wide)], kids))
+    name = "menu:{items[i]}"
+    a = append(ns, n("item", [p("state", if g.hover is name then "lit" else ""), p("do", name), p("text", items[i]), p("h", "26"), p("pad", "10"), p("fill", "1")], []))
+    add_items(a, g, items, i + 1, wide, append(kids, top(a)))
+
+define add_menu(ns: [Node], g: Gallery) -> [Node]:
+    wide = if g.menu is "screen" then "170" else "160"
+    sheet = add_items(ns, g, items_for(g), 0, wide, [])
+    # Hung off whatever opened it, or at a point when a right-click opened
+    # it nowhere in particular. It comes out of the flow, so it disturbs
+    # nothing, and it flips rather than walking off the screen - which two
+    # empty boxes the size of the pointer could never do.
+    spot = if g.menu is "context" then [p("at_x", "{g.menu_x}"), p("at_y", "{g.menu_y}")] else [p("at", g.menu), p("side", "below")]
+    hung = append(sheet, n("air", spot, [top(sheet)]))
+    # The scrim is what closes it: invisible, but it answers the click.
+    append(hung, n("air_scrim", [p("layer", "2"), p("do", "close_menu"), p("fill", "1"), p("grow", "1")], [top(hung)]))
+
+define tip_words(name: text) -> text:
+    if name is "b1" then "En helt vanlig knapp" else if name is "b2" then "Den här är vald" else if name is "dialog" then "Öppnar en ruta ovanpå allt" else if name is "open_menu" then "Öppnar en meny under sig" else if name is "switch" then "Slår av och på" else if name is "slider" then "Dra för att ändra" else ""
+
+# Notices stack up from the bottom corner and go away by themselves. They
+# hang off nothing - a point in the page - so nothing under them moves.
+define add_notes(ns: [Node], g: Gallery, said: [text], i: int, kids: [int]) -> [Node]:
+    if i >= length(said):
+        return append(ns, n("col", [p("at_x", "{g.win_w - 320}"), p("at_y", "{g.win_h - 40 - length(said) * 46}"), p("layer", "3"), p("gap", "8"), p("w", "290")], kids))
+    # The words live ON the notice. A label inside it with the SAME role
+    # painted the notice's plate a second time and, squeezed into a box
+    # shorter than its own padding, drew its line below the box it was in.
+    a = append(ns, n("air", [p("icon", "bell"), p("w", "14"), p("h", "14")], []))
+    b = append(a, n("lead", [p("text", said[i]), p("grow", "1")], []))
+    c = append(b, n("toast", [p("h", "40"), p("fill", "1"), p("align", "center")], [top(a), top(b)]))
+    add_notes(c, g, said, i + 1, append(kids, top(c)))
+
+# What you are holding, drawn whole at the pointer. Every program that
+# lets you drag a tab shows you the tab, not a hint that something is
+# happening somewhere.
+define add_carried(ns: [Node], g: Gallery) -> [Node]:
+    # One box, like the tab it came off: a box that lays out children does
+    # not centre its own label.
+    c = append(ns, n("carried", [p("text", g.carrying), p("h", "28"), p("pad", "12"), p("align", "center"), p("justify", "center")], []))
+    append(c, n("air", [p("at_x", "{g.carry_x + 12}"), p("at_y", "{g.carry_y + 12}"), p("layer", "4"), p("pass", "1")], [top(c)]))
+
+define add_tip(ns: [Node], g: Gallery) -> [Node]:
+    words = tip_words(g.tip)
+    a = append(ns, n("tip", [p("text", words), p("at", g.tip), p("side", "below"), p("layer", "3"), p("pass", "1"), p("h", "26"), p("pad", "9"), p("align", "center")], []))
+    append(a, n("air", [p("fill", "1"), p("grow", "1")], [top(a)]))
+
+# --- the dialog, which must paint above everything -------------------------
+
+define add_dialog(ns: [Node], g: Gallery) -> [Node]:
+    a = add_label(ns, "title", "Är du säker?")
+    b = append(a, n("body", [p("text", "Den här rutan ligger ovanpå allt annat. Utan lager skulle den ritas där den råkar stå i trädet och försvinna under panelerna."), p("wrap", "1"), p("fill", "1")], []))
+    c = append(b, n("air", [p("grow", "1")], []))
+    d = add_button(c, g, "Avbryt", "cancel", false)
+    e = add_button(d, g, "Gör det", "confirm", false)
+    f = append(e, n("strip", [p("gap", "10"), p("fill", "1"), p("justify", "end")], [top(c), top(d), top(e)]))
+    sheet = append(f, n("sheet", [p("w", "380"), p("h", "190")], [top(a), top(b), top(f)]))
+    # Raised: painted after everything, and picked before it.
+    append(sheet, n("scrim", [p("layer", "1"), p("fill", "1"), p("grow", "1"), p("do", "scrim"), p("align", "center"), p("justify", "center")], [top(sheet)]))
+
+# --- the screen ------------------------------------------------------------
+
+# no example: builds a document from a Gallery - proven by the app itself
+public define gallery_doc(g: Gallery) -> SemanticDocument:
+    t = append([], n("title", [p("text", "Veil")], []))
+    s = append(t, n("head", [p("text", "ALLT ETT UI BEHÖVER, PÅ FYRA SKÄRMAR")], []))
+    tb = add_tabs(s, g, tab_names(), 0, [])
+    # The head is its own zone, and so is the page below it. A stick walks
+    # within one and the shoulder buttons step between them - which is what
+    # every screen with more than one panel on it wants, and what a single
+    # flat ring through ninety controls can never give.
+    head = append(tb, n("col", [p("zone", "flikar"), p("gap", "10"), p("fill", "1")], [top(t), top(s), top(tb)]))
+
+    pg = add_page(head, g)
+    # The page itself scrolls. A box that clips accepts overflow - which
+    # is what stops the columns inside it from being squeezed down until
+    # their words are cut, and what lets a flow's second line exist.
+    # `grow` here takes the room that is SPARE. When the page is taller
+    # than the window there is none, and the box below clips and scrolls
+    # instead - so one prop covers both a short page and a long one.
+    inner = append(pg, n("col", [p("gap", "14"), p("grow", "1"), p("fill", "1")], [top(pg)]))
+    rolled = append(inner, n("air", [p("do", "page"), p("zone", "sidan"), p("grow", "1"), p("fill", "1"), p("clip", "1"), p("scrollbar", "1"), p("scroll_y", "{g.page}")], [top(inner)]))
+    content = append(rolled, n("col", [p("gap", "14"), p("grow", "1"), p("fill", "1")], [top(head), top(rolled)]))
+
+    # The dialog is a sibling of the whole page, in a STACK: same box, and
+    # `layer` decides which one is on top. Flow would have put it politely
+    # underneath the thing it is supposed to cover.
+    body = if g.dialog:
+        add_dialog(content, g)
+    else:
+        append(content, n("air", [p("show", "0")], []))
+
+    over = if g.menu is not "":
+        add_menu(body, g)
+    else:
+        append(body, n("air", [p("show", "0")], []))
+
+    tipped = if tip_words(g.tip) is not "":
+        add_tip(over, g)
+    else:
+        append(over, n("air", [p("show", "0")], []))
+
+    noted = if g.notes is not "":
+        add_notes(tipped, g, split(g.notes, "|"), 0, [])
+    else:
+        append(tipped, n("air", [p("show", "0")], []))
+
+    lifted = if g.carrying is not "":
+        add_carried(noted, g)
+    else:
+        append(noted, n("air", [p("show", "0")], []))
+
+    # Which way the screen reads. It sits in a slot rather than in Gallery
+    # because it is a property of the READER and not of this screen - the
+    # same reason the scale does - and because one line here turns the whole
+    # gallery over, which is exactly the claim worth being able to check.
+    way = if slot_get_number("veil:rtl") is 1 then "rtl" else ""
+    page = append(lifted, n("page", [p("w", "{g.win_w}"), p("h", "{g.win_h}"), p("pad", "18"), p("layout", "stack"), p("dir", way)], [top(content), top(body), top(over), top(tipped), top(noted), top(lifted)]))
+    SemanticDocument{root: top(page), nodes: page}
+
+# no example: the order Tab walks now comes from veil's reading_order,
+# which is derived from where things ended up. This is kept only as the
+# handful of names the live-resize snapshot still wants.
+public define tab_order() -> [text]:
+    ["tab:kontroller", "b1", "b2", "dialog", "switch", "field"]
