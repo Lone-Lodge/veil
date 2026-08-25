@@ -8,3 +8,9 @@
 *.exe binary
 *.dll binary
 *.wasm binary
+
+# GitHub guesses the language by counting bytes.
+# The guide is generated from README.md and is documentation, not source.
+docs/** linguist-documentation
+docs/index.html linguist-generated
+examples/wasm_gallery/Inter-Regular.subset.ttf linguist-vendored
