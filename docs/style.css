@@ -19,17 +19,18 @@
  *
  *   light   text #24292e on #fafafa   14.1:1
  *           text #24292e on #f0f0f1   12.9:1   (code)
- *           dim  #64686b on #f0f0f1    4.9:1   (comments)
+ *           dim  #64686b on #f0f0f1    4.9:1   (secondary text)
  *           blue #5b7fa6 on #fafafa    4.0:1   (active, never text)
  *   dark    text #dcddde on #1e1e1e   12.3:1
  *           text #dcddde on #161616   13.3:1   (code)
- *           dim  #a3a4a4 on #161616    7.2:1   (comments)
+ *           dim  #a3a4a4 on #161616    7.2:1   (secondary text)
  *           blue #8aa8cc on #1e1e1e    6.8:1
  *
  * Code IS syntax-highlighted (highlight.js, the same token categories as the
- * VS Code grammar) but greyscale: weight for a reserved word, a lighter ink
- * for a literal, lighter still for a comment. The accent never paints text.
- * the same restraint as the workshop.
+ * VS Code grammar) in dots' editor colours, so a sample here and the same
+ * file open in the workshop are painted alike. The accent is not one of them:
+ * it means "active", which no word in a code block is. docs_check measures
+ * every hue.
  */
 
 :root {
@@ -41,20 +42,22 @@
     --link: #5b7fa6;
     --rule: #e2e4e7;
     --focus: #5b7fa6;
-    /* Syntax, the way dots spends colour. Counted in ui/style.css: ink 122
-     * times, dim 119, and the accent 56 - but almost every one of those is a
-     * TINT behind something (`color-mix(accent 16%, transparent)`), not a
-     * colour for text. So the code is greyscale and the accent is spent on
-     * "this is active" alone: a reserved word is told apart by WEIGHT, a
-     * literal by a lighter ink, a comment by a lighter one still. The only
-     * hue left is the red on a word the language retired, which is a state
-     * and not a choice. Each clears 3:1; docs_check measures them. */
-    --tok-k: #24292e;
-    --tok-t: #24292e;
-    --tok-s: #44484d;
-    --tok-n: #44484d;
-    --tok-f: #24292e;
-    --tok-x: #a03027;
+    /* Syntax: dots' editor palette, value for value (dots/code/hue.js paints
+     * `::highlight(hue-k)` and friends; ui/style.css colours them). The token
+     * letters are the same here - c, s, n, k, t, f - and so is the card they
+     * sit on, so code in the guide looks like code in the workshop.
+     *
+     * This is where colour belongs. The accent is the interface saying "this
+     * is active"; a keyword is not active, it is a keyword, and telling one
+     * kind of word from another is the whole job of a code block. Each clears
+     * 3:1 on the card; docs_check measures them. */
+    --tok-c: #4e7f43;
+    --tok-k: #1c63a8;
+    --tok-t: #20787a;
+    --tok-s: #a3462d;
+    --tok-n: #5b8a4a;
+    --tok-f: #8a7a1e;
+    --tok-x: #c4453e;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -66,12 +69,13 @@
         --link: #8aa8cc;
         --rule: #2e3134;
         --focus: #8aa8cc;
-        --tok-k: #dcddde;
-        --tok-t: #dcddde;
-        --tok-s: #c0c0c1;
-        --tok-n: #c0c0c1;
-        --tok-f: #dcddde;
-        --tok-x: #e88b7d;
+        --tok-c: #6a9955;
+        --tok-k: #569cd6;
+        --tok-t: #4ec9b0;
+        --tok-s: #ce9178;
+        --tok-n: #b5cea8;
+        --tok-f: #dcdcaa;
+        --tok-x: #e0605a;
     }
 }
 
@@ -254,8 +258,8 @@ pre code { background: none; padding: 0; }
  * Each hue clears 7:1 on the code background in both themes, chosen so five
  * DISTINCT hues stay distinguishable at AAA where five tints would not. */
 .c,
-.hl-c { color: var(--dim); }
-.hl-k { color: var(--tok-k); font-weight: 600; }
+.hl-c { color: var(--tok-c); font-style: italic; }
+.hl-k { color: var(--tok-k); }
 .hl-t { color: var(--tok-t); }
 .hl-s { color: var(--tok-s); }
 .hl-n { color: var(--tok-n); }
