@@ -14,3 +14,6 @@
 docs/** linguist-documentation
 docs/index.html linguist-generated
 examples/wasm_gallery/Inter-Regular.subset.ttf linguist-vendored
+# The generator builds the documentation and is not what this repo is written
+# in. Without this line the whole repo reads as Python, which is a plain lie.
+tools/guide.py linguist-documentation
