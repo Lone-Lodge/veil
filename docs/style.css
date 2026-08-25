@@ -28,9 +28,9 @@
  *           gold #c9a26d on #1e1e1e    7.0:1
  *
  * Code IS syntax-highlighted (highlight.js, the same token categories as the
- * VS Code grammar), in dots' own colours: gold for a reserved word, the soft
- * space blue for a literal, ink for a name, the dim tone for a comment. Three
- * colours, not six. the same three colours as the workshop.
+ * VS Code grammar), but greyscale plus one muted blue: a reserved word is
+ * told apart by WEIGHT, a literal by that blue, a comment by the dim tone.
+ * The gold never paints text. the same restraint as the workshop.
  */
 
 :root {
@@ -42,13 +42,14 @@
     --link: #8a6d3b;
     --rule: #e2e4e7;
     --focus: #8a6d3b;
-    /* Syntax colours, out of dots' own three: gold is the accent, the soft
-     * space blue is the other one, ink is everything else. Six hues on a page
-     * built from two is a rainbow, and it read as one. So: gold for the words
-     * the language reserves, blue for the values written literally, ink for
-     * names, the dim tone for comments, and one red for a word that is gone.
-     * Each clears 3:1 on the card; docs_check measures them. */
-    --tok-k: #8a6d3b;
+    /* Syntax, the way dots spends colour. Counted in ui/style.css: ink 122
+     * times, dim 119, and the accent 56 - but almost every one of those is a
+     * TINT behind something (`color-mix(accent 16%, transparent)`), not a
+     * colour for text. So no gold in the code at all. A reserved word is ink
+     * carrying weight, a literal is the one muted blue dots keeps for place,
+     * a comment is the dim tone, and a retired word is the one red. Each
+     * clears 3:1 on the card; docs_check measures them. */
+    --tok-k: #24292e;
     --tok-t: #24292e;
     --tok-s: #5b7fa6;
     --tok-n: #5b7fa6;
@@ -65,7 +66,7 @@
         --link: #c9a26d;
         --rule: #2e3134;
         --focus: #c9a26d;
-        --tok-k: #c9a26d;
+        --tok-k: #dcddde;
         --tok-t: #dcddde;
         --tok-s: #8aa8cc;
         --tok-n: #8aa8cc;
@@ -174,6 +175,8 @@ h2 {
     column-gap: 2rem;
 }
 .toc li { margin-bottom: 0.5rem; break-inside: avoid; }
+.toc a { border-radius: var(--r-small); padding: 0.05em 0.25em; margin-left: -0.25em; }
+.toc a:hover { background: var(--hover); color: inherit; text-decoration-color: currentColor; }
 .toc .toc-last { margin-bottom: 0.75rem; }
 
 /* A heading that has just been jumped to should not sit flush against the
@@ -252,7 +255,7 @@ pre code { background: none; padding: 0; }
  * DISTINCT hues stay distinguishable at AAA where five tints would not. */
 .c,
 .hl-c { color: var(--dim); }
-.hl-k { color: var(--tok-k); }
+.hl-k { color: var(--tok-k); font-weight: 600; }
 .hl-t { color: var(--tok-t); }
 .hl-s { color: var(--tok-s); }
 .hl-n { color: var(--tok-n); }
